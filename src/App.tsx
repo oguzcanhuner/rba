@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react';
 import type { ClaudeStreamEvent, ClaudeToolInput } from './claude';
+import { MarkdownContent } from './components/MarkdownContent';
 import { Button } from './components/ui/button';
 import { Textarea } from './components/ui/textarea';
 
@@ -347,6 +348,17 @@ export function App() {
                 {message.parts.length > 0 ? (
                   message.parts.map((part) => {
                     if (part.type === 'text') {
+                      if (message.role === 'assistant') {
+                        return (
+                          <MarkdownContent
+                            className="message__part message__content"
+                            key={part.id}
+                          >
+                            {part.text}
+                          </MarkdownContent>
+                        );
+                      }
+
                       return (
                         <div
                           className="message__part message__content"
