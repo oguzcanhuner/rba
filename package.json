@@ -11,24 +11,37 @@
     "build": "tsc --noEmit && vite build",
     "run:built": "npm run build && electron .",
     "check": "node --check main.js && node --check preload.js && node --check claude-cli-service.js && tsc --noEmit",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "secrets:check": "gitleaks git --redact --verbose .",
+    "secrets:staged": "gitleaks git --pre-commit --redact --staged --verbose",
+    "quality": "npm run lint && npm run format:check && npm run check && npm test && npm run build",
+    "prepare": "husky"
   },
   "dependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.7",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.0.5",
     "concurrently": "10.0.4",
     "cross-env": "10.1.0",
     "electron": "43.3.0",
+    "husky": "9.1.7",
+    "lint-staged": "16.4.0",
     "typescript": "7.0.2",
     "vite": "8.2.1",
     "wait-on": "9.1.0"
   },
   "engines": {
     "node": ">=22.12.0"
+  },
+  "lint-staged": {
+    "*.{js,cjs,mjs,jsx,ts,mts,tsx,json,jsonc,css,html}": "biome check --no-errors-on-unmatched"
   }
 }

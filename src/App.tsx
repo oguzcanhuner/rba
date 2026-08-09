@@ -82,7 +82,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    endOfMessages.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length > 0) {
+      endOfMessages.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -106,11 +108,7 @@ export function App() {
       content: '',
       status: 'streaming',
     };
-    setMessages((current) => [
-      ...current,
-      userMessage,
-      assistantMessage,
-    ]);
+    setMessages((current) => [...current, userMessage, assistantMessage]);
     setDraft('');
     setError(null);
     setActiveRequestId(requestId);
@@ -194,7 +192,9 @@ export function App() {
             </button>
           )}
         </form>
-        <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
+        <p className="composer-hint">
+          Enter to send · Shift+Enter for a new line
+        </p>
       </footer>
     </main>
   );
