@@ -260,6 +260,11 @@
   padding: 24px;
 }
 
+.findings__content--empty {
+  display: grid;
+  place-items: center;
+}
+
 .typeset-findings {
   --typeset-size: 1rem;
   --typeset-leading: 1.625;
@@ -268,8 +273,34 @@
   font-size: var(--typeset-size);
 }
 
-.findings__empty {
-  max-width: 36ch;
+.findings-empty {
+  display: grid;
+  justify-items: center;
+  width: min(100%, 420px);
+  padding: 24px;
+  text-align: center;
+}
+
+.findings-empty__graphic {
+  display: block;
+  width: 88px;
+  height: auto;
+  margin-bottom: 18px;
+}
+
+.findings-empty__copy {
+  max-width: 34ch;
+}
+
+.findings-empty__copy h3 {
+  margin: 0 0 8px;
+  color: var(--foreground);
+  font-size: 1.25rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.findings-empty__copy p {
   margin: 0;
   color: var(--muted-foreground);
   font-size: 0.875rem;

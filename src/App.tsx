@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
+import findingsEmptyIcon from './assets/findings-empty.svg';
 import plusIcon from './assets/plus.svg';
 import sidebarCollapseIcon from './assets/sidebar-collapse.svg';
 import type {
@@ -632,15 +633,30 @@ export function App() {
             <header className="findings__header">
               <h2>Findings</h2>
             </header>
-            <div className="findings__content" aria-live="polite">
+            <div
+              className={`findings__content${activeExploration?.findingsMarkdown ? '' : ' findings__content--empty'}`}
+              aria-live="polite"
+            >
               {activeExploration?.findingsMarkdown ? (
                 <MarkdownContent className="typeset-findings">
                   {activeExploration.findingsMarkdown}
                 </MarkdownContent>
               ) : (
-                <p className="findings__empty">
-                  Findings will appear here as the exploration develops.
-                </p>
+                <div className="findings-empty">
+                  <img
+                    className="findings-empty__graphic"
+                    src={findingsEmptyIcon}
+                    alt=""
+                    aria-hidden="true"
+                  />
+                  <div className="findings-empty__copy">
+                    <h3>Findings will take shape here</h3>
+                    <p>
+                      As you explore, key insights and decisions will be
+                      gathered into a clear, evolving summary.
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
           </aside>

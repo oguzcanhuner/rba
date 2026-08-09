@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+  <title>Document</title>
+  <defs>
+    <filter id="shadow" x="10" y="4" width="58" height="76" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#4c4f69" flood-opacity="0.09" />
+    </filter>
+  </defs>
+  <path
+    d="M22 10H47L60 23V66C60 68.2 58.2 70 56 70H22C19.8 70 18 68.2 18 66V14C18 11.8 19.8 10 22 10Z"
+    fill="#e6e9ef"
+    stroke="#bcc0cc"
+    stroke-width="2"
+    stroke-linejoin="round"
+    filter="url(#shadow)"
+  />
+  <path
+    d="M47 10V20C47 21.7 48.3 23 50 23H60"
+    stroke="#bcc0cc"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path d="M28 34H43" stroke="#8839ef" stroke-width="3" stroke-linecap="round" />
+  <path d="M28 45H50M28 54H46" stroke="#acb0be" stroke-width="2" stroke-linecap="round" />
+</svg>
