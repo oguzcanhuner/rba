@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { realpath, stat } = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
 
 const activeRequests = new Map();
-const sessionIds = new Map();
+const sessions = new Map();
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
@@ -37,11 +38,33 @@ function isValidStartRequest(request) {
       request.requestId.length <= 100 &&
       typeof request.prompt === 'string' &&
       request.prompt.trim().length > 0 &&
-      request.prompt.length <= 100_000,
+      request.prompt.length <= 100_000 &&
+      typeof request.cwd === 'string' &&
+      request.cwd.length > 0 &&
+      request.cwd.length <= 4096 &&
+      path.isAbsolute(request.cwd),
   );
 }
 
+async function validatedDirectory(directory) {
+  const resolvedDirectory = await realpath(directory);
+  const directoryStat = await stat(resolvedDirectory);
+
+  if (!directoryStat.isDirectory()) {
+    throw new Error('The working directory is not a directory.');
+  }
+
+  return resolvedDirectory;
+}
+
 function readableClaudeError(error) {
+  if (
+    ['EACCES', 'ENOENT', 'ENOTDIR'].includes(error?.code) ||
+    error?.message === 'The working directory is not a directory.'
+  ) {
+    return 'The selected working directory is no longer available.';
+  }
+
   if (error?.code === 'CLI_NOT_FOUND') {
     return 'Claude CLI was not found. Install Claude Code or set CLAUDE_PATH to its executable.';
   }
@@ -76,13 +99,29 @@ async function startClaudeRequest(event, request) {
     return;
   }
 
-  let activeRequest;
+  const activeRequest = {
+    requestId: request.requestId,
+    cancelled: false,
+    cancel: () => {},
+  };
+  activeRequests.set(event.sender.id, activeRequest);
 
   try {
+    const cwd = await validatedDirectory(request.cwd);
+
+    if (activeRequest.cancelled) {
+      sendClaudeEvent(event.sender, {
+        type: 'cancelled',
+        requestId: request.requestId,
+      });
+      return;
+    }
+
+    const session = sessions.get(event.sender.id);
     const stream = beginClaudeCli({
       prompt: request.prompt,
-      sessionId: sessionIds.get(event.sender.id),
-      cwd: process.cwd(),
+      sessionId: session?.cwd === cwd ? session.id : undefined,
+      cwd,
       onText: (text) => {
         sendClaudeEvent(event.sender, {
           type: 'text-delta',
@@ -92,12 +131,7 @@ async function startClaudeRequest(event, request) {
       },
     });
 
-    activeRequest = {
-      requestId: request.requestId,
-      cancelled: false,
-      cancel: stream.cancel,
-    };
-    activeRequests.set(event.sender.id, activeRequest);
+    activeRequest.cancel = stream.cancel;
 
     const result = await stream.completion;
 
@@ -107,7 +141,7 @@ async function startClaudeRequest(event, request) {
         requestId: request.requestId,
       });
     } else {
-      sessionIds.set(event.sender.id, result.sessionId);
+      sessions.set(event.sender.id, { id: result.sessionId, cwd });
       sendClaudeEvent(event.sender, {
         type: 'complete',
         requestId: request.requestId,
@@ -146,6 +180,31 @@ ipcMain.on('claude:cancel', (event, requestId) => {
   }
 });
 
+ipcMain.handle('claude:get-default-directory', async (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted directory request.');
+  }
+
+  return realpath(process.cwd());
+});
+
+ipcMain.handle('claude:pick-directory', async (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted directory request.');
+  }
+
+  const options = {
+    defaultPath: process.cwd(),
+    properties: ['openDirectory'],
+  };
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const result = owner
+    ? await dialog.showOpenDialog(owner, options)
+    : await dialog.showOpenDialog(options);
+
+  return result.canceled ? null : validatedDirectory(result.filePaths[0]);
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
@@ -162,7 +221,7 @@ function createWindow() {
   window.webContents.once('destroyed', () => {
     activeRequests.get(webContentsId)?.cancel();
     activeRequests.delete(webContentsId);
-    sessionIds.delete(webContentsId);
+    sessions.delete(webContentsId);
   });
 
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;

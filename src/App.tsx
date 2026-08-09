@@ -29,9 +29,19 @@ function statusLabel(message: DisplayMessage) {
 export function App() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const endOfMessages = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    window.claude
+      .getDefaultDirectory()
+      .then(setWorkingDirectory)
+      .catch(() => {
+        setError('The default working directory could not be loaded.');
+      });
+  }, []);
 
   useEffect(() => {
     const handleEvent = (event: ClaudeStreamEvent) => {
@@ -91,7 +101,7 @@ export function App() {
     event.preventDefault();
 
     const content = draft.trim();
-    if (!content || activeRequestId) {
+    if (!content || activeRequestId || !workingDirectory) {
       return;
     }
 
@@ -112,7 +122,25 @@ export function App() {
     setDraft('');
     setError(null);
     setActiveRequestId(requestId);
-    window.claude.start({ requestId, prompt: content });
+    window.claude.start({
+      requestId,
+      prompt: content,
+      cwd: workingDirectory,
+    });
+  }
+
+  async function chooseWorkingDirectory() {
+    try {
+      const directory = await window.claude.pickDirectory();
+
+      if (directory && directory !== workingDirectory) {
+        setWorkingDirectory(directory);
+        setMessages([]);
+        setError(null);
+      }
+    } catch {
+      setError('A working directory could not be selected.');
+    }
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -172,6 +200,18 @@ export function App() {
 
       <footer className="composer-area">
         {error && <div className="error-message">{error}</div>}
+        <div className="working-directory">
+          <span title={workingDirectory ?? undefined}>
+            Working directory: {workingDirectory ?? 'Loading…'}
+          </span>
+          <button
+            type="button"
+            disabled={activeRequestId !== null}
+            onClick={chooseWorkingDirectory}
+          >
+            Choose folder
+          </button>
+        </div>
         <form className="composer" onSubmit={submitMessage}>
           <textarea
             aria-label="Message Claude"
@@ -187,7 +227,7 @@ export function App() {
               Stop
             </button>
           ) : (
-            <button type="submit" disabled={!draft.trim()}>
+            <button type="submit" disabled={!draft.trim() || !workingDirectory}>
               Send
             </button>
           )}

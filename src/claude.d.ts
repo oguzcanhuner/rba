@@ -6,6 +6,7 @@ export type ClaudeMessage = {
 export type ClaudeStartRequest = {
   requestId: string;
   prompt: string;
+  cwd: string;
 };
 
 export type ClaudeStreamEvent =
@@ -23,6 +24,8 @@ declare global {
     claude: {
       start(request: ClaudeStartRequest): void;
       cancel(requestId: string): void;
+      getDefaultDirectory(): Promise<string>;
+      pickDirectory(): Promise<string | null>;
       onEvent(callback: (event: ClaudeStreamEvent) => void): () => void;
     };
   }

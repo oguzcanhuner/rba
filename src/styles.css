@@ -116,6 +116,37 @@ button {
   background: #faf8f3;
 }
 
+.working-directory {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #706a61;
+  font-size: 12px;
+}
+
+.working-directory span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-directory button {
+  padding: 5px 8px;
+  border: 1px solid #c8c1b5;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.working-directory button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .composer {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -193,6 +224,7 @@ button {
   .chat__header span,
   .empty-state p,
   .composer-hint,
+  .working-directory,
   .message__role,
   .thinking {
     color: #aaa298;
@@ -205,6 +237,10 @@ button {
   .composer {
     border-color: #514a42;
     background: #302c27;
+  }
+
+  .working-directory button {
+    border-color: #514a42;
   }
 
   .composer textarea {
