@@ -1,28 +1,116 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
 :root {
-  color: #24211d;
-  background: #f3f0e9;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  color-scheme: light;
   font-synthesis: none;
+  --background: #e6e9ef;
+  --foreground: #4c4f69;
+  --card: #ccd0da;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: #8839ef;
+  --primary-foreground: #eff1f5;
+  --secondary: #ccd0da;
+  --secondary-foreground: #4c4f69;
+  --muted: #eff1f5;
+  --muted-foreground: #6c6f85;
+  --accent: #bcc0cc;
+  --accent-foreground: #4c4f69;
+  --destructive: #d20f39;
+  --border: #bcc0cc;
+  --input: #acb0be;
+  --ring: #1e66f5;
+  --chart-1: #1e66f5;
+  --chart-2: #8839ef;
+  --chart-3: #40a02b;
+  --chart-4: #fe640b;
+  --chart-5: #ea76cb;
+  --radius: 0.625rem;
+  --sidebar: #e6e9ef;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --surface-translucent: rgb(230 233 239 / 94%);
+  --status-running: #fe640b;
+  --status-success: #40a02b;
+  --status-danger: var(--destructive);
+  --role-user: #1e66f5;
+  --role-agent: #8839ef;
 }
 
-* {
-  box-sizing: border-box;
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-body {
-  margin: 0;
-  min-width: 420px;
-}
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
 
-button,
-textarea {
-  font: inherit;
-}
+  html {
+    @apply font-sans;
+  }
 
-button {
-  border: 0;
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    min-width: 420px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 .chat {
@@ -35,25 +123,26 @@ button {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 18px 24px;
-  border-bottom: 1px solid #d8d3c9;
-  background: rgba(250, 248, 243, 0.92);
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-translucent);
 }
 
 .chat__header h1 {
   margin: 0;
-  font-size: 18px;
-  letter-spacing: 0.04em;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
 }
 
 .chat__header span {
-  color: #706a61;
-  font-size: 13px;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
 
 .messages {
   overflow-y: auto;
-  padding: 32px max(24px, calc((100vw - 760px) / 2));
+  padding: 16px;
 }
 
 .empty-state {
@@ -65,43 +154,56 @@ button {
 
 .empty-state h2 {
   margin: 0 0 8px;
-  font-size: 28px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .empty-state p,
 .composer-hint {
   margin: 0;
-  color: #706a61;
+  color: var(--muted-foreground);
 }
 
 .message {
-  margin-bottom: 28px;
+  margin-bottom: 12px;
 }
 
 .message--user {
-  margin-left: min(18%, 120px);
-  padding: 14px 16px;
-  border-radius: 16px 16px 4px 16px;
-  background: #ded8ca;
+  margin-left: 32px;
+  padding: 12px;
+  border-left: 3px solid var(--role-user);
+  border-radius: var(--radius-xl);
+  background: var(--secondary);
 }
 
 .message__role {
-  margin-bottom: 6px;
-  color: #736c62;
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
   text-transform: uppercase;
 }
 
+.message--user .message__role {
+  color: var(--role-user);
+}
+
+.message--assistant .message__role {
+  color: var(--role-agent);
+}
+
 .message__content {
-  line-height: 1.6;
+  max-width: 72ch;
+  font-size: 1rem;
+  line-height: 1.625;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .message__part + .message__part {
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .tool-use {
@@ -109,35 +211,35 @@ button {
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  padding: 5px 9px;
-  border: 1px solid #d8d3c9;
-  border-radius: 8px;
-  color: #706a61;
-  background: rgba(250, 248, 243, 0.72);
-  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  background: var(--muted);
+  font-size: 0.75rem;
 }
 
 .tool-use__indicator {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #7d8a72;
+  background: var(--status-success);
 }
 
 .tool-use--running .tool-use__indicator {
   animation: tool-pulse 1.2s ease-in-out infinite;
-  background: #a27652;
+  background: var(--status-running);
 }
 
 .tool-use--cancelled .tool-use__indicator,
 .tool-use--error .tool-use__indicator {
-  background: #a15f47;
+  background: var(--status-danger);
 }
 
 .tool-use__label {
-  color: #514b43;
-  font-weight: 650;
+  color: var(--foreground);
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -157,18 +259,18 @@ button {
 
 .message__status {
   margin-top: 8px;
-  color: #8a5c3d;
-  font-size: 12px;
+  color: var(--destructive);
+  font-size: 0.75rem;
 }
 
 .thinking {
-  color: #8b857b;
+  color: var(--muted-foreground);
 }
 
 .composer-area {
-  padding: 16px max(24px, calc((100vw - 760px) / 2)) 18px;
-  border-top: 1px solid #d8d3c9;
-  background: #faf8f3;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-translucent);
 }
 
 .working-directory {
@@ -176,8 +278,8 @@ button {
   align-items: center;
   gap: 12px;
   margin-bottom: 10px;
-  color: #706a61;
-  font-size: 12px;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
 
 .working-directory span {
@@ -188,140 +290,53 @@ button {
   white-space: nowrap;
 }
 
-.working-directory button {
-  padding: 5px 8px;
-  border: 1px solid #c8c1b5;
-  border-radius: 7px;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
-}
-
-.working-directory button:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
 .composer {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid #c8c1b5;
-  border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 8px 24px rgba(54, 45, 35, 0.07);
+  align-items: end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  box-shadow: 0 8px 24px rgb(76 79 105 / 8%);
 }
 
 .composer:focus-within {
-  border-color: #847566;
-  box-shadow: 0 0 0 3px rgba(132, 117, 102, 0.13);
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent);
 }
 
-.composer textarea {
-  width: 100%;
+.composer .composer__input {
+  min-height: 72px;
   resize: none;
   border: 0;
-  outline: 0;
-  color: #24211d;
   background: transparent;
-  line-height: 1.45;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1.55;
+  box-shadow: none;
 }
 
-.composer textarea:disabled {
-  color: #8b857b;
-}
-
-.composer button {
-  align-self: end;
-  min-width: 68px;
-  padding: 9px 14px;
-  border-radius: 10px;
-  color: #ffffff;
-  background: #574b40;
-  cursor: pointer;
-  font-weight: 650;
-}
-
-.composer button:disabled {
-  cursor: default;
-  opacity: 0.45;
+.composer .composer__input:focus-visible {
+  border: 0;
+  box-shadow: none;
 }
 
 .composer-hint {
   margin-top: 8px;
   text-align: center;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .error-message {
   margin-bottom: 10px;
   padding: 10px 12px;
-  border: 1px solid #d9a88b;
-  border-radius: 10px;
-  color: #753d26;
-  background: #fff0e8;
-  font-size: 13px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #ece7df;
-    background: #201e1b;
-  }
-
-  .chat__header,
-  .composer-area {
-    border-color: #3d3933;
-    background: #27241f;
-  }
-
-  .chat__header span,
-  .empty-state p,
-  .composer-hint,
-  .working-directory,
-  .message__role,
-  .thinking {
-    color: #aaa298;
-  }
-
-  .message--user {
-    background: #3a352e;
-  }
-
-  .tool-use {
-    border-color: #46413a;
-    color: #aaa298;
-    background: rgba(48, 44, 39, 0.72);
-  }
-
-  .tool-use__label {
-    color: #d7d0c7;
-  }
-
-  .composer {
-    border-color: #514a42;
-    background: #302c27;
-  }
-
-  .working-directory button {
-    border-color: #514a42;
-  }
-
-  .composer textarea {
-    color: #ece7df;
-  }
-
-  .composer button {
-    color: #27211c;
-    background: #d5c5b5;
-  }
-
-  .error-message {
-    border-color: #754b37;
-    color: #f2c6ae;
-    background: #40281f;
-  }
+  border: 1px solid color-mix(in oklch, var(--destructive) 42%, var(--border));
+  border-radius: var(--radius-lg);
+  color: var(--destructive);
+  background: color-mix(in oklch, var(--destructive) 9%, var(--background));
+  font-size: 0.8125rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

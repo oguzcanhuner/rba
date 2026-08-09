@@ -6,6 +6,8 @@ import {
   useState,
 } from 'react';
 import type { ClaudeStreamEvent, ClaudeToolInput } from './claude';
+import { Button } from './components/ui/button';
+import { Textarea } from './components/ui/textarea';
 
 type MessageStatus = 'streaming' | 'complete' | 'cancelled' | 'error';
 type ToolStatus = 'running' | 'complete' | 'cancelled' | 'error';
@@ -321,13 +323,13 @@ export function App() {
     <main className="chat">
       <header className="chat__header">
         <h1>RBA</h1>
-        <span>Claude CLI · Sonnet</span>
+        <span>Sonnet</span>
       </header>
 
       <section className="messages" aria-live="polite">
         {messages.length === 0 ? (
           <div className="empty-state">
-            <h2>Chat with Claude</h2>
+            <h2>Chat with RBA</h2>
             <p>Send a message to start a conversation.</p>
           </div>
         ) : (
@@ -340,7 +342,7 @@ export function App() {
                 key={message.id}
               >
                 <div className="message__role">
-                  {message.role === 'user' ? 'You' : 'Claude'}
+                  {message.role === 'user' ? 'You' : 'RBA'}
                 </div>
                 {message.parts.length > 0 ? (
                   message.parts.map((part) => {
@@ -392,32 +394,35 @@ export function App() {
           <span title={workingDirectory ?? undefined}>
             Working directory: {workingDirectory ?? 'Loading…'}
           </span>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
             disabled={activeRequestId !== null}
             onClick={chooseWorkingDirectory}
           >
             Choose folder
-          </button>
+          </Button>
         </div>
         <form className="composer" onSubmit={submitMessage}>
-          <textarea
-            aria-label="Message Claude"
+          <Textarea
+            className="composer__input"
+            aria-label="Message RBA"
             disabled={activeRequestId !== null}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleComposerKeyDown}
-            placeholder="Message Claude"
+            placeholder="Message RBA"
             rows={3}
             value={draft}
           />
           {activeRequestId ? (
-            <button type="button" onClick={cancelResponse}>
+            <Button type="button" variant="secondary" onClick={cancelResponse}>
               Stop
-            </button>
+            </Button>
           ) : (
-            <button type="submit" disabled={!draft.trim() || !workingDirectory}>
+            <Button type="submit" disabled={!draft.trim() || !workingDirectory}>
               Send
-            </button>
+            </Button>
           )}
         </form>
         <p className="composer-hint">
