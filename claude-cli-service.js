@@ -12,6 +12,9 @@ function beginClaudeCli({
   sessionId,
   cwd,
   onText,
+  onToolStart = () => {},
+  onToolInput = () => {},
+  onToolResult = () => {},
   spawnProcess = spawn,
   environment = process.env,
 }) {
@@ -24,7 +27,7 @@ function beginClaudeCli({
     '--verbose',
     '--safe-mode',
     '--tools',
-    '',
+    'Glob,Read',
     '--model',
     'sonnet',
   ];
@@ -43,6 +46,7 @@ function beginClaudeCli({
   let stderr = '';
   let result;
   let protocolError;
+  const toolBlocks = new Map();
 
   function handleLine(line) {
     if (!line.trim()) {
@@ -67,6 +71,62 @@ function beginClaudeCli({
       message.event.delta?.type === 'text_delta'
     ) {
       onText(message.event.delta.text);
+    }
+
+    if (
+      message.type === 'stream_event' &&
+      message.event?.type === 'content_block_start' &&
+      message.event.content_block?.type === 'tool_use'
+    ) {
+      const tool = message.event.content_block;
+      toolBlocks.set(message.event.index, {
+        id: tool.id,
+        input: '',
+      });
+      onToolStart({ id: tool.id, name: tool.name });
+    }
+
+    if (
+      message.type === 'stream_event' &&
+      message.event?.type === 'content_block_delta' &&
+      message.event.delta?.type === 'input_json_delta'
+    ) {
+      const tool = toolBlocks.get(message.event.index);
+
+      if (tool) {
+        tool.input += message.event.delta.partial_json;
+      }
+    }
+
+    if (
+      message.type === 'stream_event' &&
+      message.event?.type === 'content_block_stop'
+    ) {
+      const tool = toolBlocks.get(message.event.index);
+
+      if (tool) {
+        try {
+          onToolInput({
+            id: tool.id,
+            input: tool.input ? JSON.parse(tool.input) : {},
+          });
+        } catch {
+          onToolInput({ id: tool.id, input: null });
+        }
+
+        toolBlocks.delete(message.event.index);
+      }
+    }
+
+    if (message.type === 'user' && Array.isArray(message.message?.content)) {
+      for (const content of message.message.content) {
+        if (content.type === 'tool_result') {
+          onToolResult({
+            id: content.tool_use_id,
+            isError: content.is_error === true,
+          });
+        }
+      }
     }
 
     if (message.type === 'result') {

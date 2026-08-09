@@ -5,13 +5,27 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { ClaudeMessage, ClaudeStreamEvent } from './claude';
+import type { ClaudeStreamEvent, ClaudeToolInput } from './claude';
 
 type MessageStatus = 'streaming' | 'complete' | 'cancelled' | 'error';
+type ToolStatus = 'running' | 'complete' | 'cancelled' | 'error';
 
-type DisplayMessage = ClaudeMessage & {
+type DisplayTool = {
   id: string;
+  name: string;
+  input: ClaudeToolInput;
+  status: ToolStatus;
+};
+
+type DisplayPart =
+  | { type: 'text'; id: string; text: string }
+  | { type: 'tool'; tool: DisplayTool };
+
+type DisplayMessage = {
+  id: string;
+  role: 'user' | 'assistant';
   status: MessageStatus;
+  parts: DisplayPart[];
 };
 
 function statusLabel(message: DisplayMessage) {
@@ -24,6 +38,62 @@ function statusLabel(message: DisplayMessage) {
   }
 
   return null;
+}
+
+function toolLabel(tool: DisplayTool) {
+  const action = tool.name === 'Glob' ? 'list files' : 'read file';
+
+  if (tool.status === 'running') {
+    return `${action[0].toUpperCase()}${action.slice(1)}…`;
+  }
+
+  if (tool.status === 'cancelled') {
+    return `${action[0].toUpperCase()}${action.slice(1)} stopped`;
+  }
+
+  if (tool.status === 'error') {
+    return `Could not ${action}`;
+  }
+
+  return tool.name === 'Glob' ? 'Listed files' : 'Read file';
+}
+
+function toolDetail(tool: DisplayTool) {
+  if (!tool.input) {
+    return null;
+  }
+
+  const value =
+    tool.name === 'Glob' ? tool.input.pattern : tool.input.file_path;
+  return typeof value === 'string' ? value : null;
+}
+
+function appendText(
+  parts: DisplayPart[],
+  text: string,
+  requestId: string,
+): DisplayPart[] {
+  const lastPart = parts.at(-1);
+
+  if (lastPart?.type === 'text') {
+    return [
+      ...parts.slice(0, -1),
+      { type: 'text', id: lastPart.id, text: lastPart.text + text },
+    ];
+  }
+
+  return [
+    ...parts,
+    { type: 'text', id: `${requestId}-text-${parts.length}`, text },
+  ];
+}
+
+function finishTools(parts: DisplayPart[], status: ToolStatus) {
+  return parts.map((part) =>
+    part.type === 'tool' && part.tool.status === 'running'
+      ? { ...part, tool: { ...part.tool, status } }
+      : part,
+  );
 }
 
 export function App() {
@@ -49,7 +119,82 @@ export function App() {
         setMessages((current) =>
           current.map((message) =>
             message.id === `assistant-${event.requestId}`
-              ? { ...message, content: message.content + event.text }
+              ? {
+                  ...message,
+                  parts: appendText(message.parts, event.text, event.requestId),
+                }
+              : message,
+          ),
+        );
+        return;
+      }
+
+      if (event.type === 'tool-start') {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === `assistant-${event.requestId}`
+              ? {
+                  ...message,
+                  parts: [
+                    ...message.parts,
+                    {
+                      type: 'tool' as const,
+                      tool: {
+                        id: event.tool.id,
+                        name: event.tool.name,
+                        input: null,
+                        status: 'running' as const,
+                      },
+                    },
+                  ],
+                }
+              : message,
+          ),
+        );
+        return;
+      }
+
+      if (event.type === 'tool-input') {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === `assistant-${event.requestId}`
+              ? {
+                  ...message,
+                  parts: message.parts.map((part) =>
+                    part.type === 'tool' && part.tool.id === event.tool.id
+                      ? {
+                          ...part,
+                          tool: { ...part.tool, input: event.tool.input },
+                        }
+                      : part,
+                  ),
+                }
+              : message,
+          ),
+        );
+        return;
+      }
+
+      if (event.type === 'tool-result') {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === `assistant-${event.requestId}`
+              ? {
+                  ...message,
+                  parts: message.parts.map((part) =>
+                    part.type === 'tool' && part.tool.id === event.tool.id
+                      ? {
+                          ...part,
+                          tool: {
+                            ...part.tool,
+                            status: event.tool.isError
+                              ? ('error' as const)
+                              : ('complete' as const),
+                          },
+                        }
+                      : part,
+                  ),
+                }
               : message,
           ),
         );
@@ -60,7 +205,11 @@ export function App() {
         setMessages((current) =>
           current.map((message) =>
             message.id === `assistant-${event.requestId}`
-              ? { ...message, status: 'complete' }
+              ? {
+                  ...message,
+                  status: 'complete',
+                  parts: finishTools(message.parts, 'complete'),
+                }
               : message,
           ),
         );
@@ -68,7 +217,11 @@ export function App() {
         setMessages((current) =>
           current.map((message) =>
             message.id === `assistant-${event.requestId}`
-              ? { ...message, status: 'cancelled' }
+              ? {
+                  ...message,
+                  status: 'cancelled',
+                  parts: finishTools(message.parts, 'cancelled'),
+                }
               : message,
           ),
         );
@@ -76,7 +229,11 @@ export function App() {
         setMessages((current) =>
           current.map((message) =>
             message.id === `assistant-${event.requestId}`
-              ? { ...message, status: 'error' }
+              ? {
+                  ...message,
+                  status: 'error',
+                  parts: finishTools(message.parts, 'error'),
+                }
               : message,
           ),
         );
@@ -109,14 +266,14 @@ export function App() {
     const userMessage: DisplayMessage = {
       id: `user-${requestId}`,
       role: 'user',
-      content,
       status: 'complete',
+      parts: [{ type: 'text', id: `${requestId}-text-0`, text: content }],
     };
     const assistantMessage: DisplayMessage = {
       id: `assistant-${requestId}`,
       role: 'assistant',
-      content: '',
       status: 'streaming',
+      parts: [],
     };
     setMessages((current) => [...current, userMessage, assistantMessage]);
     setDraft('');
@@ -185,11 +342,42 @@ export function App() {
                 <div className="message__role">
                   {message.role === 'user' ? 'You' : 'Claude'}
                 </div>
-                <div className="message__content">
-                  {message.content || (
+                {message.parts.length > 0 ? (
+                  message.parts.map((part) => {
+                    if (part.type === 'text') {
+                      return (
+                        <div
+                          className="message__part message__content"
+                          key={part.id}
+                        >
+                          {part.text}
+                        </div>
+                      );
+                    }
+
+                    const tool = part.tool;
+                    const detail = toolDetail(tool);
+
+                    return (
+                      <div
+                        className={`message__part tool-use tool-use--${tool.status}`}
+                        key={tool.id}
+                      >
+                        <span className="tool-use__indicator" />
+                        <span className="tool-use__label">
+                          {toolLabel(tool)}
+                        </span>
+                        {detail && (
+                          <code className="tool-use__detail">{detail}</code>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="message__content">
                     <span className="thinking">Thinking…</span>
-                  )}
-                </div>
+                  </div>
+                )}
                 {label && <div className="message__status">{label}</div>}
               </article>
             );

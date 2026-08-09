@@ -9,8 +9,25 @@ export type ClaudeStartRequest = {
   cwd: string;
 };
 
+export type ClaudeToolInput = Record<string, unknown> | null;
+
 export type ClaudeStreamEvent =
   | { type: 'text-delta'; requestId: string; text: string }
+  | {
+      type: 'tool-start';
+      requestId: string;
+      tool: { id: string; name: string };
+    }
+  | {
+      type: 'tool-input';
+      requestId: string;
+      tool: { id: string; input: ClaudeToolInput };
+    }
+  | {
+      type: 'tool-result';
+      requestId: string;
+      tool: { id: string; isError: boolean };
+    }
   | {
       type: 'complete';
       requestId: string;

@@ -100,6 +100,61 @@ button {
   white-space: pre-wrap;
 }
 
+.message__part + .message__part {
+  margin-top: 10px;
+}
+
+.tool-use {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #d8d3c9;
+  border-radius: 8px;
+  color: #706a61;
+  background: rgba(250, 248, 243, 0.72);
+  font-size: 12px;
+}
+
+.tool-use__indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7d8a72;
+}
+
+.tool-use--running .tool-use__indicator {
+  animation: tool-pulse 1.2s ease-in-out infinite;
+  background: #a27652;
+}
+
+.tool-use--cancelled .tool-use__indicator,
+.tool-use--error .tool-use__indicator {
+  background: #a15f47;
+}
+
+.tool-use__label {
+  color: #514b43;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.tool-use__detail {
+  overflow: hidden;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes tool-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .message__status {
   margin-top: 8px;
   color: #8a5c3d;
@@ -234,6 +289,16 @@ button {
     background: #3a352e;
   }
 
+  .tool-use {
+    border-color: #46413a;
+    color: #aaa298;
+    background: rgba(48, 44, 39, 0.72);
+  }
+
+  .tool-use__label {
+    color: #d7d0c7;
+  }
+
   .composer {
     border-color: #514a42;
     background: #302c27;
@@ -256,5 +321,11 @@ button {
     border-color: #754b37;
     color: #f2c6ae;
     background: #40281f;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-use--running .tool-use__indicator {
+    animation: none;
   }
 }

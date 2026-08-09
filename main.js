@@ -76,6 +76,25 @@ function readableClaudeError(error) {
   return 'Claude CLI could not complete the response. Try running `claude` in a terminal to check its status.';
 }
 
+function relativeToolInput(input, cwd) {
+  if (!input || typeof input !== 'object') {
+    return input;
+  }
+
+  const relativeInput = { ...input };
+
+  for (const key of ['file_path', 'path', 'pattern']) {
+    if (
+      typeof relativeInput[key] === 'string' &&
+      path.isAbsolute(relativeInput[key])
+    ) {
+      relativeInput[key] = path.relative(cwd, relativeInput[key]) || '.';
+    }
+  }
+
+  return relativeInput;
+}
+
 async function startClaudeRequest(event, request) {
   if (!isTrustedSender(event.senderFrame)) {
     return;
@@ -127,6 +146,30 @@ async function startClaudeRequest(event, request) {
           type: 'text-delta',
           requestId: request.requestId,
           text,
+        });
+      },
+      onToolStart: (tool) => {
+        sendClaudeEvent(event.sender, {
+          type: 'tool-start',
+          requestId: request.requestId,
+          tool,
+        });
+      },
+      onToolInput: (tool) => {
+        sendClaudeEvent(event.sender, {
+          type: 'tool-input',
+          requestId: request.requestId,
+          tool: {
+            ...tool,
+            input: relativeToolInput(tool.input, cwd),
+          },
+        });
+      },
+      onToolResult: (tool) => {
+        sendClaudeEvent(event.sender, {
+          type: 'tool-result',
+          requestId: request.requestId,
+          tool,
         });
       },
     });
