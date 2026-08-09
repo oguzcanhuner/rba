@@ -124,6 +124,10 @@
   height: 100vh;
 }
 
+.app-shell--sidebar-collapsed {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+
 .exploration-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -140,6 +144,32 @@
   padding: 14px 12px;
   font-size: 0.8125rem;
   font-weight: 600;
+}
+
+.exploration-sidebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.exploration-sidebar__toggle-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.exploration-sidebar__new-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.exploration-sidebar__toggle-icon--expand {
+  transform: rotate(180deg);
+}
+
+.app-shell--sidebar-collapsed .exploration-sidebar__header {
+  justify-content: center;
+  padding-inline: 8px;
 }
 
 .exploration-list {
@@ -423,6 +453,10 @@
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .app-shell--sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .exploration-sidebar {

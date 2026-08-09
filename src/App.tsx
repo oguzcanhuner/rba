@@ -5,6 +5,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import plusIcon from './assets/plus.svg';
+import sidebarCollapseIcon from './assets/sidebar-collapse.svg';
 import type {
   ClaudeStreamEvent,
   DisplayMessage,
@@ -136,6 +138,7 @@ export function App() {
   const [explorations, setExplorations] = useState<ExplorationSummary[]>([]);
   const [activeExploration, setActiveExploration] =
     useState<Exploration | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
@@ -484,42 +487,79 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="exploration-sidebar" aria-label="Explorations">
+    <main
+      className={`app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}
+    >
+      <aside
+        className="exploration-sidebar"
+        id="exploration-sidebar"
+        aria-label="Explorations"
+      >
         <div className="exploration-sidebar__header">
-          <span>Explorations</span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            disabled={activeRequestId !== null}
-            onClick={startNewExploration}
-          >
-            New
-          </Button>
-        </div>
-        <nav className="exploration-list">
-          {explorations.length === 0 ? (
-            <p className="exploration-list__empty">No explorations yet</p>
-          ) : (
-            explorations.map((exploration) => (
+          {!isSidebarCollapsed && <span>Explorations</span>}
+          <div className="exploration-sidebar__actions">
+            {!isSidebarCollapsed && (
               <Button
-                className="exploration-list__item"
                 type="button"
-                variant="ghost"
-                key={exploration.id}
+                size="icon-sm"
                 disabled={activeRequestId !== null}
-                aria-current={
-                  exploration.id === activeExploration?.id ? 'page' : undefined
-                }
-                title={exploration.title}
-                onClick={() => selectExploration(exploration.id)}
+                aria-label="New exploration"
+                title="New exploration"
+                onClick={startNewExploration}
               >
-                {exploration.title}
+                <img
+                  className="exploration-sidebar__new-icon"
+                  src={plusIcon}
+                  alt=""
+                  aria-hidden="true"
+                />
               </Button>
-            ))
-          )}
-        </nav>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-controls="exploration-sidebar"
+              aria-expanded={!isSidebarCollapsed}
+              aria-label={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
+              title={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
+              onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+            >
+              <img
+                className={`exploration-sidebar__toggle-icon${isSidebarCollapsed ? ' exploration-sidebar__toggle-icon--expand' : ''}`}
+                src={sidebarCollapseIcon}
+                alt=""
+                aria-hidden="true"
+              />
+            </Button>
+          </div>
+        </div>
+        {!isSidebarCollapsed && (
+          <nav className="exploration-list">
+            {explorations.length === 0 ? (
+              <p className="exploration-list__empty">No explorations yet</p>
+            ) : (
+              explorations.map((exploration) => (
+                <Button
+                  className="exploration-list__item"
+                  type="button"
+                  variant="ghost"
+                  key={exploration.id}
+                  disabled={activeRequestId !== null}
+                  aria-current={
+                    exploration.id === activeExploration?.id
+                      ? 'page'
+                      : undefined
+                  }
+                  title={exploration.title}
+                  onClick={() => selectExploration(exploration.id)}
+                >
+                  {exploration.title}
+                </Button>
+              ))
+            )}
+          </nav>
+        )}
       </aside>
 
       <section className="chat">
@@ -628,20 +668,13 @@ export function App() {
               rows={3}
               value={draft}
             />
-            {activeRequestId ? (
+            {activeRequestId && (
               <Button
                 type="button"
                 variant="secondary"
                 onClick={cancelResponse}
               >
                 Stop
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                disabled={!draft.trim() || !workingDirectory}
-              >
-                Send
               </Button>
             )}
           </form>
