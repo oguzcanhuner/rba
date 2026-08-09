@@ -7,4 +7,7 @@ export default defineConfig({
     cspNonce: 'rba-vite',
   },
   plugins: [react()],
+  server: {
+    strictPort: true,
+  },
 });
