@@ -3,9 +3,10 @@ const { realpath, stat } = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
+const { ExplorationStore } = require('./exploration-store');
 
 const activeRequests = new Map();
-const sessions = new Map();
+let explorationStore;
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
@@ -42,7 +43,57 @@ function isValidStartRequest(request) {
       typeof request.cwd === 'string' &&
       request.cwd.length > 0 &&
       request.cwd.length <= 4096 &&
-      path.isAbsolute(request.cwd),
+      path.isAbsolute(request.cwd) &&
+      (request.sessionId === undefined ||
+        (typeof request.sessionId === 'string' &&
+          request.sessionId.length > 0 &&
+          request.sessionId.length <= 200)),
+  );
+}
+
+function isValidExploration(exploration) {
+  const validSession =
+    exploration?.agentSession === null ||
+    (exploration?.agentSession &&
+      typeof exploration.agentSession.id === 'string' &&
+      typeof exploration.agentSession.provider === 'string' &&
+      exploration.agentSession.provider.length > 0 &&
+      exploration.agentSession.provider.length <= 100 &&
+      typeof exploration.agentSession.externalId === 'string' &&
+      exploration.agentSession.externalId.length > 0 &&
+      exploration.agentSession.externalId.length <= 500 &&
+      exploration.agentSession.metadata &&
+      typeof exploration.agentSession.metadata === 'object' &&
+      typeof exploration.agentSession.createdAt === 'string' &&
+      typeof exploration.agentSession.updatedAt === 'string');
+
+  return Boolean(
+    exploration &&
+      typeof exploration.id === 'string' &&
+      exploration.id.length > 0 &&
+      exploration.id.length <= 100 &&
+      typeof exploration.title === 'string' &&
+      exploration.title.length > 0 &&
+      exploration.title.length <= 200 &&
+      typeof exploration.workingDirectory === 'string' &&
+      exploration.workingDirectory.length > 0 &&
+      exploration.workingDirectory.length <= 4096 &&
+      path.isAbsolute(exploration.workingDirectory) &&
+      typeof exploration.createdAt === 'string' &&
+      typeof exploration.updatedAt === 'string' &&
+      validSession &&
+      Array.isArray(exploration.messages) &&
+      exploration.messages.length <= 10_000 &&
+      exploration.messages.every(
+        (message) =>
+          message &&
+          typeof message.id === 'string' &&
+          ['user', 'assistant'].includes(message.role) &&
+          ['streaming', 'complete', 'cancelled', 'error'].includes(
+            message.status,
+          ) &&
+          Array.isArray(message.parts),
+      ),
   );
 }
 
@@ -136,10 +187,9 @@ async function startClaudeRequest(event, request) {
       return;
     }
 
-    const session = sessions.get(event.sender.id);
     const stream = beginClaudeCli({
       prompt: request.prompt,
-      sessionId: session?.cwd === cwd ? session.id : undefined,
+      sessionId: request.sessionId,
       cwd,
       onText: (text) => {
         sendClaudeEvent(event.sender, {
@@ -184,7 +234,6 @@ async function startClaudeRequest(event, request) {
         requestId: request.requestId,
       });
     } else {
-      sessions.set(event.sender.id, { id: result.sessionId, cwd });
       sendClaudeEvent(event.sender, {
         type: 'complete',
         requestId: request.requestId,
@@ -248,6 +297,34 @@ ipcMain.handle('claude:pick-directory', async (event) => {
   return result.canceled ? null : validatedDirectory(result.filePaths[0]);
 });
 
+ipcMain.handle('explorations:list', (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted exploration request.');
+  }
+
+  return explorationStore.list();
+});
+
+ipcMain.handle('explorations:get', (event, id) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof id !== 'string' ||
+    id.length > 100
+  ) {
+    throw new Error('Invalid exploration request.');
+  }
+
+  return explorationStore.get(id);
+});
+
+ipcMain.handle('explorations:save', (event, exploration) => {
+  if (!isTrustedSender(event.senderFrame) || !isValidExploration(exploration)) {
+    throw new Error('Invalid exploration.');
+  }
+
+  explorationStore.save(exploration);
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
@@ -264,7 +341,6 @@ function createWindow() {
   window.webContents.once('destroyed', () => {
     activeRequests.get(webContentsId)?.cancel();
     activeRequests.delete(webContentsId);
-    sessions.delete(webContentsId);
   });
 
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;
@@ -277,6 +353,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  explorationStore = new ExplorationStore(
+    path.join(app.getPath('userData'), 'explorations.sqlite3'),
+  );
   createWindow();
 
   app.on('activate', () => {
@@ -284,6 +363,10 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('will-quit', () => {
+  explorationStore?.close();
 });
 
 app.on('window-all-closed', () => {

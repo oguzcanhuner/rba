@@ -1,5 +1,7 @@
 const { spawn } = require('node:child_process');
 
+const PLANNING_PROMPT = `You are a technical lead helping a user explore a feature or problem in the current codebase. Read the code as needed, clarify the goal through discussion, identify constraints and tradeoffs, and propose a practical breakdown of the work. Do not write or modify code. Do not claim implementation has been completed.`;
+
 class ClaudeCliError extends Error {
   constructor(code, message) {
     super(message);
@@ -26,6 +28,8 @@ function beginClaudeCli({
     '--include-partial-messages',
     '--verbose',
     '--safe-mode',
+    '--append-system-prompt',
+    PLANNING_PROMPT,
     '--tools',
     'Glob,Read',
     '--model',

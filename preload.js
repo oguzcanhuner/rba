@@ -12,3 +12,9 @@ contextBridge.exposeInMainWorld('claude', {
     return () => ipcRenderer.removeListener('claude:event', listener);
   },
 });
+
+contextBridge.exposeInMainWorld('explorations', {
+  list: () => ipcRenderer.invoke('explorations:list'),
+  get: (id) => ipcRenderer.invoke('explorations:get', id),
+  save: (exploration) => ipcRenderer.invoke('explorations:save', exploration),
+});

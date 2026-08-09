@@ -7,6 +7,7 @@ export type ClaudeStartRequest = {
   requestId: string;
   prompt: string;
   cwd: string;
+  sessionId?: string;
 };
 
 export type ClaudeToolInput = Record<string, unknown> | null;
@@ -36,6 +37,49 @@ export type ClaudeStreamEvent =
   | { type: 'cancelled'; requestId: string }
   | { type: 'error'; requestId: string; message: string };
 
+export type MessageStatus = 'streaming' | 'complete' | 'cancelled' | 'error';
+export type ToolStatus = 'running' | 'complete' | 'cancelled' | 'error';
+
+export type DisplayTool = {
+  id: string;
+  name: string;
+  input: ClaudeToolInput;
+  status: ToolStatus;
+};
+
+export type DisplayPart =
+  | { type: 'text'; id: string; text: string }
+  | { type: 'tool'; tool: DisplayTool };
+
+export type DisplayMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  status: MessageStatus;
+  parts: DisplayPart[];
+};
+
+export type AgentSession = {
+  id: string;
+  provider: string;
+  externalId: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExplorationSummary = {
+  id: string;
+  title: string;
+  workingDirectory: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Exploration = ExplorationSummary & {
+  agentSession: AgentSession | null;
+  messages: DisplayMessage[];
+};
+
 declare global {
   interface Window {
     claude: {
@@ -44,6 +88,11 @@ declare global {
       getDefaultDirectory(): Promise<string>;
       pickDirectory(): Promise<string | null>;
       onEvent(callback: (event: ClaudeStreamEvent) => void): () => void;
+    };
+    explorations: {
+      list(): Promise<ExplorationSummary[]>;
+      get(id: string): Promise<Exploration | null>;
+      save(exploration: Exploration): Promise<void>;
     };
   }
 }

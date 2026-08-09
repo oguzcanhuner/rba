@@ -118,10 +118,69 @@
   }
 }
 
+.app-shell {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  height: 100vh;
+}
+
+.exploration-sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  border-right: 1px solid var(--sidebar-border);
+  background: var(--sidebar);
+}
+
+.exploration-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.exploration-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+
+.exploration-list .exploration-list__item {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 2px;
+  padding: 8px;
+  overflow: hidden;
+  color: var(--sidebar-foreground);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exploration-list .exploration-list__item[aria-current="page"] {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  font-weight: 500;
+}
+
+.exploration-list__empty {
+  margin: 8px;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
 .chat {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  height: 100vh;
+  min-width: 0;
+  min-height: 0;
 }
 
 .chat__header {
@@ -357,5 +416,40 @@
 @media (prefers-reduced-motion: reduce) {
   .tool-use--running .tool-use__indicator {
     animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .exploration-sidebar {
+    display: block;
+    border-right: 0;
+    border-bottom: 1px solid var(--sidebar-border);
+  }
+
+  .exploration-sidebar__header {
+    padding: 8px 12px;
+  }
+
+  .exploration-list {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 0 8px 8px;
+  }
+
+  .exploration-list .exploration-list__item {
+    width: auto;
+    max-width: 180px;
+    margin: 0;
+    flex: 0 0 auto;
+  }
+
+  .exploration-list__empty {
+    display: none;
   }
 }

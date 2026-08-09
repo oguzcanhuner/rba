@@ -1,0 +1,213 @@
+const { DatabaseSync } = require('node:sqlite');
+
+class ExplorationStore {
+  constructor(filename) {
+    this.database = new DatabaseSync(filename);
+    this.database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA journal_mode = WAL;
+
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY
+      );
+
+      CREATE TABLE IF NOT EXISTS explorations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        working_directory TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        id TEXT PRIMARY KEY,
+        exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS active_session_by_exploration
+        ON agent_sessions(exploration_id) WHERE is_active = 1;
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        status TEXT NOT NULL,
+        parts_json TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS messages_by_exploration
+        ON messages(exploration_id, position);
+
+      INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
+    `);
+
+    this.upsertExploration = this.database.prepare(`
+      INSERT INTO explorations (
+        id, title, working_directory, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        working_directory = excluded.working_directory,
+        updated_at = excluded.updated_at
+    `);
+    this.deactivateSessions = this.database.prepare(`
+      UPDATE agent_sessions SET is_active = 0 WHERE exploration_id = ?
+    `);
+    this.upsertSession = this.database.prepare(`
+      INSERT INTO agent_sessions (
+        id, exploration_id, provider, external_id, metadata_json,
+        is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider = excluded.provider,
+        external_id = excluded.external_id,
+        metadata_json = excluded.metadata_json,
+        is_active = 1,
+        updated_at = excluded.updated_at
+    `);
+    this.upsertMessage = this.database.prepare(`
+      INSERT INTO messages (
+        id, exploration_id, position, role, status, parts_json
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        exploration_id = excluded.exploration_id,
+        position = excluded.position,
+        role = excluded.role,
+        status = excluded.status,
+        parts_json = excluded.parts_json
+    `);
+    this.deleteStaleMessages = this.database.prepare(`
+      DELETE FROM messages
+      WHERE exploration_id = ? AND position >= ?
+    `);
+  }
+
+  list() {
+    return this.database
+      .prepare(`
+        SELECT
+          id,
+          title,
+          working_directory AS workingDirectory,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM explorations
+        ORDER BY created_at DESC
+      `)
+      .all()
+      .map((row) => ({ ...row }));
+  }
+
+  get(id) {
+    const exploration = this.database
+      .prepare(`
+        SELECT
+          id,
+          title,
+          working_directory AS workingDirectory,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM explorations
+        WHERE id = ?
+      `)
+      .get(id);
+
+    if (!exploration) {
+      return null;
+    }
+
+    const sessionRow = this.database
+      .prepare(`
+        SELECT
+          id,
+          provider,
+          external_id AS externalId,
+          metadata_json AS metadataJson,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM agent_sessions
+        WHERE exploration_id = ? AND is_active = 1
+      `)
+      .get(id);
+    let agentSession = null;
+    if (sessionRow) {
+      const { metadataJson, ...session } = sessionRow;
+      agentSession = {
+        ...session,
+        metadata: JSON.parse(metadataJson),
+      };
+    }
+
+    const messages = this.database
+      .prepare(`
+        SELECT id, role, status, parts_json AS partsJson
+        FROM messages
+        WHERE exploration_id = ?
+        ORDER BY position
+      `)
+      .all(id)
+      .map(({ partsJson, ...message }) => ({
+        ...message,
+        parts: JSON.parse(partsJson),
+      }));
+
+    return { ...exploration, agentSession, messages };
+  }
+
+  save(exploration) {
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      this.upsertExploration.run(
+        exploration.id,
+        exploration.title,
+        exploration.workingDirectory,
+        exploration.createdAt,
+        exploration.updatedAt,
+      );
+
+      if (exploration.agentSession) {
+        const session = exploration.agentSession;
+        this.deactivateSessions.run(exploration.id);
+        this.upsertSession.run(
+          session.id,
+          exploration.id,
+          session.provider,
+          session.externalId,
+          JSON.stringify(session.metadata),
+          session.createdAt,
+          session.updatedAt,
+        );
+      }
+
+      exploration.messages.forEach((message, position) => {
+        this.upsertMessage.run(
+          message.id,
+          exploration.id,
+          position,
+          message.role,
+          message.status,
+          JSON.stringify(message.parts),
+        );
+      });
+      this.deleteStaleMessages.run(exploration.id, exploration.messages.length);
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  close() {
+    this.database.close();
+  }
+}
+
+module.exports = { ExplorationStore };

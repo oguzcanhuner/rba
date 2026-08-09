@@ -54,6 +54,10 @@ test('streams text from Claude CLI JSON output', async () => {
     invocation.args[invocation.args.indexOf('--tools') + 1],
     'Glob,Read',
   );
+  assert.match(
+    invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
+    /Do not write or modify code/,
+  );
   assert.deepEqual(deltas, ['Hello']);
   assert.deepEqual(invocation.options.env, {
     PATH: '/bin',

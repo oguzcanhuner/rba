@@ -5,31 +5,17 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { ClaudeStreamEvent, ClaudeToolInput } from './claude';
+import type {
+  ClaudeStreamEvent,
+  DisplayMessage,
+  DisplayPart,
+  Exploration,
+  ExplorationSummary,
+  ToolStatus,
+} from './claude';
 import { MarkdownContent } from './components/MarkdownContent';
 import { Button } from './components/ui/button';
 import { Textarea } from './components/ui/textarea';
-
-type MessageStatus = 'streaming' | 'complete' | 'cancelled' | 'error';
-type ToolStatus = 'running' | 'complete' | 'cancelled' | 'error';
-
-type DisplayTool = {
-  id: string;
-  name: string;
-  input: ClaudeToolInput;
-  status: ToolStatus;
-};
-
-type DisplayPart =
-  | { type: 'text'; id: string; text: string }
-  | { type: 'tool'; tool: DisplayTool };
-
-type DisplayMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  status: MessageStatus;
-  parts: DisplayPart[];
-};
 
 function statusLabel(message: DisplayMessage) {
   if (message.status === 'cancelled') {
@@ -43,7 +29,7 @@ function statusLabel(message: DisplayMessage) {
   return null;
 }
 
-function toolLabel(tool: DisplayTool) {
+function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
   const action = tool.name === 'Glob' ? 'list files' : 'read file';
 
   if (tool.status === 'running') {
@@ -61,7 +47,7 @@ function toolLabel(tool: DisplayTool) {
   return tool.name === 'Glob' ? 'Listed files' : 'Read file';
 }
 
-function toolDetail(tool: DisplayTool) {
+function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
   if (!tool.input) {
     return null;
   }
@@ -99,146 +85,255 @@ function finishTools(parts: DisplayPart[], status: ToolStatus) {
   );
 }
 
+function explorationTitle(message: string) {
+  const title = message.replace(/\s+/g, ' ').trim();
+  return title.length <= 60 ? title : `${title.slice(0, 57).trimEnd()}…`;
+}
+
+function summaryOf(exploration: Exploration): ExplorationSummary {
+  const {
+    agentSession: _agentSession,
+    messages: _messages,
+    ...summary
+  } = exploration;
+  return summary;
+}
+
+function byNewestCreation(left: ExplorationSummary, right: ExplorationSummary) {
+  return right.createdAt.localeCompare(left.createdAt);
+}
+
+function restoreInterruptedMessages(exploration: Exploration): Exploration {
+  return {
+    ...exploration,
+    messages: exploration.messages.map((message) =>
+      message.status === 'streaming'
+        ? {
+            ...message,
+            status: 'error',
+            parts: finishTools(message.parts, 'error'),
+          }
+        : message,
+    ),
+  };
+}
+
+function updateAssistant(
+  exploration: Exploration,
+  requestId: string,
+  update: (message: DisplayMessage) => DisplayMessage,
+) {
+  return {
+    ...exploration,
+    updatedAt: new Date().toISOString(),
+    messages: exploration.messages.map((message) =>
+      message.id === `assistant-${requestId}` ? update(message) : message,
+    ),
+  };
+}
+
 export function App() {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [explorations, setExplorations] = useState<ExplorationSummary[]>([]);
+  const [activeExploration, setActiveExploration] =
+    useState<Exploration | null>(null);
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const endOfMessages = useRef<HTMLDivElement>(null);
+  const messages = activeExploration?.messages ?? [];
 
   useEffect(() => {
-    window.claude
-      .getDefaultDirectory()
-      .then(setWorkingDirectory)
+    let disposed = false;
+
+    Promise.all([
+      window.claude.getDefaultDirectory(),
+      window.explorations.list(),
+    ])
+      .then(async ([defaultDirectory, savedExplorations]) => {
+        if (disposed) {
+          return;
+        }
+
+        setExplorations(savedExplorations);
+        const latest = savedExplorations[0];
+
+        if (latest) {
+          const saved = await window.explorations.get(latest.id);
+          if (!disposed && saved) {
+            const restored = restoreInterruptedMessages(saved);
+            setActiveExploration(restored);
+            setWorkingDirectory(restored.workingDirectory);
+          }
+        } else {
+          setWorkingDirectory(defaultDirectory);
+        }
+      })
       .catch(() => {
-        setError('The default working directory could not be loaded.');
+        if (!disposed) {
+          setError('Saved explorations could not be loaded.');
+        }
       });
+
+    return () => {
+      disposed = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!activeExploration) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      window.explorations
+        .save(activeExploration)
+        .then(() => {
+          const summary = summaryOf(activeExploration);
+          setExplorations((current) =>
+            [summary, ...current.filter((item) => item.id !== summary.id)].sort(
+              byNewestCreation,
+            ),
+          );
+        })
+        .catch(() => {
+          setError('This exploration could not be saved.');
+        });
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeExploration]);
 
   useEffect(() => {
     const handleEvent = (event: ClaudeStreamEvent) => {
       if (event.type === 'text-delta') {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  parts: appendText(message.parts, event.text, event.requestId),
-                }
-              : message,
-          ),
+        setActiveExploration((current) =>
+          current
+            ? updateAssistant(current, event.requestId, (message) => ({
+                ...message,
+                parts: appendText(message.parts, event.text, event.requestId),
+              }))
+            : current,
         );
         return;
       }
 
       if (event.type === 'tool-start') {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  parts: [
-                    ...message.parts,
-                    {
-                      type: 'tool' as const,
-                      tool: {
-                        id: event.tool.id,
-                        name: event.tool.name,
-                        input: null,
-                        status: 'running' as const,
-                      },
+        setActiveExploration((current) =>
+          current
+            ? updateAssistant(current, event.requestId, (message) => ({
+                ...message,
+                parts: [
+                  ...message.parts,
+                  {
+                    type: 'tool',
+                    tool: {
+                      id: event.tool.id,
+                      name: event.tool.name,
+                      input: null,
+                      status: 'running',
                     },
-                  ],
-                }
-              : message,
-          ),
+                  },
+                ],
+              }))
+            : current,
         );
         return;
       }
 
       if (event.type === 'tool-input') {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  parts: message.parts.map((part) =>
-                    part.type === 'tool' && part.tool.id === event.tool.id
-                      ? {
-                          ...part,
-                          tool: { ...part.tool, input: event.tool.input },
-                        }
-                      : part,
-                  ),
-                }
-              : message,
-          ),
+        setActiveExploration((current) =>
+          current
+            ? updateAssistant(current, event.requestId, (message) => ({
+                ...message,
+                parts: message.parts.map((part) =>
+                  part.type === 'tool' && part.tool.id === event.tool.id
+                    ? {
+                        ...part,
+                        tool: { ...part.tool, input: event.tool.input },
+                      }
+                    : part,
+                ),
+              }))
+            : current,
         );
         return;
       }
 
       if (event.type === 'tool-result') {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  parts: message.parts.map((part) =>
-                    part.type === 'tool' && part.tool.id === event.tool.id
-                      ? {
-                          ...part,
-                          tool: {
-                            ...part.tool,
-                            status: event.tool.isError
-                              ? ('error' as const)
-                              : ('complete' as const),
-                          },
-                        }
-                      : part,
-                  ),
-                }
-              : message,
-          ),
+        setActiveExploration((current) =>
+          current
+            ? updateAssistant(current, event.requestId, (message) => ({
+                ...message,
+                parts: message.parts.map((part) =>
+                  part.type === 'tool' && part.tool.id === event.tool.id
+                    ? {
+                        ...part,
+                        tool: {
+                          ...part.tool,
+                          status: event.tool.isError ? 'error' : 'complete',
+                        },
+                      }
+                    : part,
+                ),
+              }))
+            : current,
         );
         return;
       }
 
       if (event.type === 'complete') {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  status: 'complete',
-                  parts: finishTools(message.parts, 'complete'),
-                }
-              : message,
-          ),
-        );
+        setActiveExploration((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const now = new Date().toISOString();
+          const updated = updateAssistant(
+            current,
+            event.requestId,
+            (message) => ({
+              ...message,
+              status: 'complete',
+              parts: finishTools(message.parts, 'complete'),
+            }),
+          );
+          const existingSession =
+            current.agentSession?.provider === 'claude'
+              ? current.agentSession
+              : null;
+
+          return {
+            ...updated,
+            agentSession: {
+              id: existingSession?.id ?? crypto.randomUUID(),
+              provider: 'claude',
+              externalId: event.sessionId,
+              metadata: existingSession?.metadata ?? {},
+              createdAt: existingSession?.createdAt ?? now,
+              updatedAt: now,
+            },
+          };
+        });
       } else if (event.type === 'cancelled') {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  status: 'cancelled',
-                  parts: finishTools(message.parts, 'cancelled'),
-                }
-              : message,
-          ),
+        setActiveExploration((current) =>
+          current
+            ? updateAssistant(current, event.requestId, (message) => ({
+                ...message,
+                status: 'cancelled',
+                parts: finishTools(message.parts, 'cancelled'),
+              }))
+            : current,
         );
       } else {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === `assistant-${event.requestId}`
-              ? {
-                  ...message,
-                  status: 'error',
-                  parts: finishTools(message.parts, 'error'),
-                }
-              : message,
-          ),
+        setActiveExploration((current) =>
+          current
+            ? updateAssistant(current, event.requestId, (message) => ({
+                ...message,
+                status: 'error',
+                parts: finishTools(message.parts, 'error'),
+              }))
+            : current,
         );
         setError(event.message);
       }
@@ -266,6 +361,7 @@ export function App() {
     }
 
     const requestId = crypto.randomUUID();
+    const now = new Date().toISOString();
     const userMessage: DisplayMessage = {
       id: `user-${requestId}`,
       role: 'user',
@@ -278,7 +374,27 @@ export function App() {
       status: 'streaming',
       parts: [],
     };
-    setMessages((current) => [...current, userMessage, assistantMessage]);
+    const exploration: Exploration = activeExploration
+      ? {
+          ...activeExploration,
+          updatedAt: now,
+          messages: [
+            ...activeExploration.messages,
+            userMessage,
+            assistantMessage,
+          ],
+        }
+      : {
+          id: crypto.randomUUID(),
+          title: explorationTitle(content),
+          workingDirectory,
+          agentSession: null,
+          messages: [userMessage, assistantMessage],
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    setActiveExploration(exploration);
     setDraft('');
     setError(null);
     setActiveRequestId(requestId);
@@ -286,7 +402,16 @@ export function App() {
       requestId,
       prompt: content,
       cwd: workingDirectory,
+      ...(exploration.agentSession?.provider === 'claude'
+        ? { sessionId: exploration.agentSession.externalId }
+        : {}),
     });
+  }
+
+  async function persistCurrentExploration() {
+    if (activeExploration) {
+      await window.explorations.save(activeExploration);
+    }
   }
 
   async function chooseWorkingDirectory() {
@@ -294,12 +419,50 @@ export function App() {
       const directory = await window.claude.pickDirectory();
 
       if (directory && directory !== workingDirectory) {
+        await persistCurrentExploration();
         setWorkingDirectory(directory);
-        setMessages([]);
+        setActiveExploration(null);
+        setDraft('');
         setError(null);
       }
     } catch {
       setError('A working directory could not be selected.');
+    }
+  }
+
+  async function selectExploration(id: string) {
+    if (activeRequestId || id === activeExploration?.id) {
+      return;
+    }
+
+    try {
+      await persistCurrentExploration();
+      const exploration = await window.explorations.get(id);
+
+      if (exploration) {
+        const restored = restoreInterruptedMessages(exploration);
+        setActiveExploration(restored);
+        setWorkingDirectory(restored.workingDirectory);
+        setDraft('');
+        setError(null);
+      }
+    } catch {
+      setError('This exploration could not be loaded.');
+    }
+  }
+
+  async function startNewExploration() {
+    if (activeRequestId) {
+      return;
+    }
+
+    try {
+      await persistCurrentExploration();
+      setActiveExploration(null);
+      setDraft('');
+      setError(null);
+    } catch {
+      setError('This exploration could not be saved.');
     }
   }
 
@@ -321,126 +484,172 @@ export function App() {
   }
 
   return (
-    <main className="chat">
-      <header className="chat__header">
-        <h1>RBA</h1>
-        <span>Sonnet</span>
-      </header>
-
-      <section className="messages" aria-live="polite">
-        {messages.length === 0 ? (
-          <div className="empty-state">
-            <h2>Chat with RBA</h2>
-            <p>Send a message to start a conversation.</p>
-          </div>
-        ) : (
-          messages.map((message) => {
-            const label = statusLabel(message);
-
-            return (
-              <article
-                className={`message message--${message.role}`}
-                key={message.id}
+    <main className="app-shell">
+      <aside className="exploration-sidebar" aria-label="Explorations">
+        <div className="exploration-sidebar__header">
+          <span>Explorations</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            disabled={activeRequestId !== null}
+            onClick={startNewExploration}
+          >
+            New
+          </Button>
+        </div>
+        <nav className="exploration-list">
+          {explorations.length === 0 ? (
+            <p className="exploration-list__empty">No explorations yet</p>
+          ) : (
+            explorations.map((exploration) => (
+              <Button
+                className="exploration-list__item"
+                type="button"
+                variant="ghost"
+                key={exploration.id}
+                disabled={activeRequestId !== null}
+                aria-current={
+                  exploration.id === activeExploration?.id ? 'page' : undefined
+                }
+                title={exploration.title}
+                onClick={() => selectExploration(exploration.id)}
               >
-                <div className="message__role">
-                  {message.role === 'user' ? 'You' : 'RBA'}
-                </div>
-                {message.parts.length > 0 ? (
-                  message.parts.map((part) => {
-                    if (part.type === 'text') {
-                      if (message.role === 'assistant') {
+                {exploration.title}
+              </Button>
+            ))
+          )}
+        </nav>
+      </aside>
+
+      <section className="chat">
+        <header className="chat__header">
+          <h1>{activeExploration?.title ?? 'RBA'}</h1>
+          <span>Sonnet</span>
+        </header>
+
+        <section className="messages" aria-live="polite">
+          {messages.length === 0 ? (
+            <div className="empty-state">
+              <h2>What would you like to explore?</h2>
+              <p>Describe a feature, problem, or idea to begin.</p>
+            </div>
+          ) : (
+            messages.map((message) => {
+              const label = statusLabel(message);
+
+              return (
+                <article
+                  className={`message message--${message.role}`}
+                  key={message.id}
+                >
+                  <div className="message__role">
+                    {message.role === 'user' ? 'You' : 'RBA'}
+                  </div>
+                  {message.parts.length > 0 ? (
+                    message.parts.map((part) => {
+                      if (part.type === 'text') {
+                        if (message.role === 'assistant') {
+                          return (
+                            <MarkdownContent
+                              className="message__part message__content"
+                              key={part.id}
+                            >
+                              {part.text}
+                            </MarkdownContent>
+                          );
+                        }
+
                         return (
-                          <MarkdownContent
+                          <div
                             className="message__part message__content"
                             key={part.id}
                           >
                             {part.text}
-                          </MarkdownContent>
+                          </div>
                         );
                       }
 
+                      const tool = part.tool;
+                      const detail = toolDetail(tool);
+
                       return (
                         <div
-                          className="message__part message__content"
-                          key={part.id}
+                          className={`message__part tool-use tool-use--${tool.status}`}
+                          key={tool.id}
                         >
-                          {part.text}
+                          <span className="tool-use__indicator" />
+                          <span className="tool-use__label">
+                            {toolLabel(tool)}
+                          </span>
+                          {detail && (
+                            <code className="tool-use__detail">{detail}</code>
+                          )}
                         </div>
                       );
-                    }
-
-                    const tool = part.tool;
-                    const detail = toolDetail(tool);
-
-                    return (
-                      <div
-                        className={`message__part tool-use tool-use--${tool.status}`}
-                        key={tool.id}
-                      >
-                        <span className="tool-use__indicator" />
-                        <span className="tool-use__label">
-                          {toolLabel(tool)}
-                        </span>
-                        {detail && (
-                          <code className="tool-use__detail">{detail}</code>
-                        )}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="message__content">
-                    <span className="thinking">Thinking…</span>
-                  </div>
-                )}
-                {label && <div className="message__status">{label}</div>}
-              </article>
-            );
-          })
-        )}
-        <div ref={endOfMessages} />
-      </section>
-
-      <footer className="composer-area">
-        {error && <div className="error-message">{error}</div>}
-        <div className="working-directory">
-          <span title={workingDirectory ?? undefined}>
-            Working directory: {workingDirectory ?? 'Loading…'}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            disabled={activeRequestId !== null}
-            onClick={chooseWorkingDirectory}
-          >
-            Choose folder
-          </Button>
-        </div>
-        <form className="composer" onSubmit={submitMessage}>
-          <Textarea
-            className="composer__input"
-            aria-label="Message RBA"
-            disabled={activeRequestId !== null}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            placeholder="Message RBA"
-            rows={3}
-            value={draft}
-          />
-          {activeRequestId ? (
-            <Button type="button" variant="secondary" onClick={cancelResponse}>
-              Stop
-            </Button>
-          ) : (
-            <Button type="submit" disabled={!draft.trim() || !workingDirectory}>
-              Send
-            </Button>
+                    })
+                  ) : (
+                    <div className="message__content">
+                      <span className="thinking">Thinking…</span>
+                    </div>
+                  )}
+                  {label && <div className="message__status">{label}</div>}
+                </article>
+              );
+            })
           )}
-        </form>
-        <p className="composer-hint">
-          Enter to send · Shift+Enter for a new line
-        </p>
-      </footer>
+          <div ref={endOfMessages} />
+        </section>
+
+        <footer className="composer-area">
+          {error && <div className="error-message">{error}</div>}
+          <div className="working-directory">
+            <span title={workingDirectory ?? undefined}>
+              Working directory: {workingDirectory ?? 'Loading…'}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={activeRequestId !== null}
+              onClick={chooseWorkingDirectory}
+            >
+              Choose folder
+            </Button>
+          </div>
+          <form className="composer" onSubmit={submitMessage}>
+            <Textarea
+              className="composer__input"
+              aria-label="Message RBA"
+              disabled={activeRequestId !== null}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              placeholder="Message RBA"
+              rows={3}
+              value={draft}
+            />
+            {activeRequestId ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={cancelResponse}
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                disabled={!draft.trim() || !workingDirectory}
+              >
+                Send
+              </Button>
+            )}
+          </form>
+          <p className="composer-hint">
+            Enter to send · Shift+Enter for a new line
+          </p>
+        </footer>
+      </section>
     </main>
   );
 }
