@@ -1,60 +1,136 @@
 const { DatabaseSync } = require('node:sqlite');
 
+function hasTable(database, table) {
+  return Boolean(
+    database
+      .prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?")
+      .get(table),
+  );
+}
+
+function hasColumn(database, table, column) {
+  return database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some(({ name }) => name === column);
+}
+
+const migrations = [
+  {
+    version: 1,
+    isApplied(database) {
+      return ['explorations', 'agent_sessions', 'messages'].every((table) =>
+        hasTable(database, table),
+      );
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS explorations (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          working_directory TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+          id TEXT PRIMARY KEY,
+          exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL,
+          external_id TEXT NOT NULL,
+          metadata_json TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS active_session_by_exploration
+          ON agent_sessions(exploration_id) WHERE is_active = 1;
+
+        CREATE TABLE IF NOT EXISTS messages (
+          id TEXT PRIMARY KEY,
+          exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          status TEXT NOT NULL,
+          parts_json TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS messages_by_exploration
+          ON messages(exploration_id, position);
+      `);
+    },
+  },
+  {
+    version: 2,
+    isApplied(database) {
+      return hasColumn(database, 'explorations', 'findings_markdown');
+    },
+    up(database) {
+      if (!hasColumn(database, 'explorations', 'findings_markdown')) {
+        database.exec(
+          'ALTER TABLE explorations ADD COLUMN findings_markdown TEXT',
+        );
+      }
+    },
+  },
+];
+
+function migrate(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY
+    )
+  `);
+
+  const appliedVersions = new Set(
+    database
+      .prepare('SELECT version FROM schema_migrations')
+      .all()
+      .map(({ version }) => version),
+  );
+  const recordMigration = database.prepare(
+    'INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)',
+  );
+
+  for (const migration of migrations) {
+    if (
+      appliedVersions.has(migration.version) &&
+      migration.isApplied(database)
+    ) {
+      continue;
+    }
+
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      migration.up(database);
+      recordMigration.run(migration.version);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
+
 class ExplorationStore {
   constructor(filename) {
     this.database = new DatabaseSync(filename);
     this.database.exec(`
       PRAGMA foreign_keys = ON;
       PRAGMA journal_mode = WAL;
-
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY
-      );
-
-      CREATE TABLE IF NOT EXISTS explorations (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        working_directory TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS agent_sessions (
-        id TEXT PRIMARY KEY,
-        exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
-        provider TEXT NOT NULL,
-        external_id TEXT NOT NULL,
-        metadata_json TEXT NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS active_session_by_exploration
-        ON agent_sessions(exploration_id) WHERE is_active = 1;
-
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
-        position INTEGER NOT NULL,
-        role TEXT NOT NULL,
-        status TEXT NOT NULL,
-        parts_json TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS messages_by_exploration
-        ON messages(exploration_id, position);
-
-      INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
+      PRAGMA busy_timeout = 5000;
     `);
+    migrate(this.database);
 
     this.upsertExploration = this.database.prepare(`
       INSERT INTO explorations (
-        id, title, working_directory, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?)
+        id, title, working_directory, findings_markdown, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         working_directory = excluded.working_directory,
+        findings_markdown = excluded.findings_markdown,
         updated_at = excluded.updated_at
     `);
     this.deactivateSessions = this.database.prepare(`
@@ -112,6 +188,7 @@ class ExplorationStore {
           id,
           title,
           working_directory AS workingDirectory,
+          findings_markdown AS findingsMarkdown,
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM explorations
@@ -169,6 +246,7 @@ class ExplorationStore {
         exploration.id,
         exploration.title,
         exploration.workingDirectory,
+        exploration.findingsMarkdown,
         exploration.createdAt,
         exploration.updatedAt,
       );

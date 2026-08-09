@@ -5,6 +5,7 @@ export type ClaudeMessage = {
 
 export type ClaudeStartRequest = {
   requestId: string;
+  explorationId: string;
   prompt: string;
   cwd: string;
   sessionId?: string;
@@ -28,6 +29,11 @@ export type ClaudeStreamEvent =
       type: 'tool-result';
       requestId: string;
       tool: { id: string; isError: boolean };
+    }
+  | {
+      type: 'findings-updated';
+      requestId: string;
+      markdown: string;
     }
   | {
       type: 'complete';
@@ -77,6 +83,7 @@ export type ExplorationSummary = {
 
 export type Exploration = ExplorationSummary & {
   agentSession: AgentSession | null;
+  findingsMarkdown: string | null;
   messages: DisplayMessage[];
 };
 

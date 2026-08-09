@@ -26,6 +26,13 @@ test('streams text from Claude CLI JSON output', async () => {
   const response = beginClaudeCli({
     prompt: 'Hello',
     cwd: '/workspace',
+    findingsServer: {
+      command: '/electron',
+      script: '/app/findings-mcp-server.js',
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+    },
+    explorationDatabase: '/app-data/explorations.sqlite3',
+    explorationId: 'exploration-1',
     onText: (text) => deltas.push(text),
     spawnProcess,
     environment: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/claude-config' },
@@ -56,8 +63,29 @@ test('streams text from Claude CLI JSON output', async () => {
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /Do not write or modify code/,
+    /Do not write or modify files/,
   );
+  assert.equal(
+    invocation.args[invocation.args.indexOf('--allowedTools') + 1],
+    'mcp__rba__read_findings,mcp__rba__update_findings',
+  );
+  const mcpConfig = JSON.parse(
+    invocation.args[invocation.args.indexOf('--mcp-config') + 1],
+  );
+  assert.deepEqual(mcpConfig, {
+    mcpServers: {
+      rba: {
+        command: '/electron',
+        args: ['/app/findings-mcp-server.js'],
+        env: {
+          ELECTRON_RUN_AS_NODE: '1',
+          RBA_EXPLORATION_DATABASE: '/app-data/explorations.sqlite3',
+          RBA_EXPLORATION_ID: 'exploration-1',
+        },
+      },
+    },
+  });
+  assert.equal(invocation.args.includes('--safe-mode'), false);
   assert.deepEqual(deltas, ['Hello']);
   assert.deepEqual(invocation.options.env, {
     PATH: '/bin',
@@ -73,6 +101,9 @@ test('resumes an existing CLI session and supports cancellation', () => {
     prompt: 'Continue',
     sessionId: 'session-123',
     cwd: '/workspace',
+    findingsServer: { command: '/electron', script: '/app/server.js' },
+    explorationDatabase: '/app-data/explorations.sqlite3',
+    explorationId: 'exploration-1',
     onText: () => {},
     spawnProcess: (_command, receivedArgs) => {
       args = receivedArgs;
@@ -92,6 +123,9 @@ test('reports tool input and completion from Claude CLI output', async () => {
   const response = beginClaudeCli({
     prompt: 'Find package.json',
     cwd: '/workspace',
+    findingsServer: { command: '/electron', script: '/app/server.js' },
+    explorationDatabase: '/app-data/explorations.sqlite3',
+    explorationId: 'exploration-1',
     onText: (text) => events.push({ type: 'text', text }),
     onToolStart: (tool) => events.push({ type: 'start', tool }),
     onToolInput: (tool) => events.push({ type: 'input', tool }),

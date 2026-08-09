@@ -1,6 +1,11 @@
 const { spawn } = require('node:child_process');
+function planningPrompt() {
+  return `You are a technical lead helping a user explore a feature or problem in the current codebase. Read the code as needed, clarify the goal through discussion, identify constraints and tradeoffs, and eventually propose a practical breakdown of the work.
 
-const PLANNING_PROMPT = `You are a technical lead helping a user explore a feature or problem in the current codebase. Read the code as needed, clarify the goal through discussion, identify constraints and tradeoffs, and propose a practical breakdown of the work. Do not write or modify code. Do not claim implementation has been completed.`;
+Maintain the exploration's living findings document with read_findings and update_findings. As the conversation produces meaningful new understanding, use update_findings to replace it with the FULL revised Markdown document. Call read_findings first when revising it. Keep it concise and useful: capture the goal, verified findings, decisions, open questions, and decomposition when they become relevant. Let the document's structure emerge from the conversation instead of filling a fixed template. Do not include Mermaid diagrams or create any other artifacts.
+
+Do not write or modify files. Do not claim implementation has been completed.`;
+}
 
 class ClaudeCliError extends Error {
   constructor(code, message) {
@@ -13,6 +18,9 @@ function beginClaudeCli({
   prompt,
   sessionId,
   cwd,
+  findingsServer,
+  explorationDatabase,
+  explorationId,
   onText,
   onToolStart = () => {},
   onToolInput = () => {},
@@ -20,6 +28,19 @@ function beginClaudeCli({
   spawnProcess = spawn,
   environment = process.env,
 }) {
+  const mcpConfig = {
+    mcpServers: {
+      rba: {
+        command: findingsServer.command,
+        args: [findingsServer.script],
+        env: {
+          ...findingsServer.env,
+          RBA_EXPLORATION_DATABASE: explorationDatabase,
+          RBA_EXPLORATION_ID: explorationId,
+        },
+      },
+    },
+  };
   const args = [
     '-p',
     prompt,
@@ -27,11 +48,17 @@ function beginClaudeCli({
     'stream-json',
     '--include-partial-messages',
     '--verbose',
-    '--safe-mode',
     '--append-system-prompt',
-    PLANNING_PROMPT,
+    planningPrompt(),
+    '--mcp-config',
+    JSON.stringify(mcpConfig),
+    '--strict-mcp-config',
     '--tools',
     'Glob,Read',
+    '--allowedTools',
+    'mcp__rba__read_findings,mcp__rba__update_findings',
+    '--permission-mode',
+    'dontAsk',
     '--model',
     'sonnet',
   ];

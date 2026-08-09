@@ -7,6 +7,7 @@ const { ExplorationStore } = require('./exploration-store');
 
 const activeRequests = new Map();
 let explorationStore;
+let explorationDatabase;
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
@@ -37,6 +38,9 @@ function isValidStartRequest(request) {
     request &&
       typeof request.requestId === 'string' &&
       request.requestId.length <= 100 &&
+      typeof request.explorationId === 'string' &&
+      request.explorationId.length > 0 &&
+      request.explorationId.length <= 100 &&
       typeof request.prompt === 'string' &&
       request.prompt.trim().length > 0 &&
       request.prompt.length <= 100_000 &&
@@ -81,6 +85,9 @@ function isValidExploration(exploration) {
       path.isAbsolute(exploration.workingDirectory) &&
       typeof exploration.createdAt === 'string' &&
       typeof exploration.updatedAt === 'string' &&
+      (exploration.findingsMarkdown === null ||
+        (typeof exploration.findingsMarkdown === 'string' &&
+          exploration.findingsMarkdown.length <= 500_000)) &&
       validSession &&
       Array.isArray(exploration.messages) &&
       exploration.messages.length <= 10_000 &&
@@ -187,10 +194,19 @@ async function startClaudeRequest(event, request) {
       return;
     }
 
+    const toolNames = new Map();
+    const pendingFindings = new Map();
     const stream = beginClaudeCli({
       prompt: request.prompt,
       sessionId: request.sessionId,
       cwd,
+      explorationDatabase,
+      explorationId: request.explorationId,
+      findingsServer: {
+        command: process.execPath,
+        script: path.join(__dirname, 'findings-mcp-server.js'),
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+      },
       onText: (text) => {
         sendClaudeEvent(event.sender, {
           type: 'text-delta',
@@ -199,6 +215,7 @@ async function startClaudeRequest(event, request) {
         });
       },
       onToolStart: (tool) => {
+        toolNames.set(tool.id, tool.name);
         sendClaudeEvent(event.sender, {
           type: 'tool-start',
           requestId: request.requestId,
@@ -206,12 +223,23 @@ async function startClaudeRequest(event, request) {
         });
       },
       onToolInput: (tool) => {
+        const toolName = toolNames.get(tool.id);
+        if (
+          toolName === 'mcp__rba__update_findings' &&
+          typeof tool.input?.markdown === 'string' &&
+          tool.input.markdown.length <= 500_000
+        ) {
+          pendingFindings.set(tool.id, tool.input.markdown);
+        }
         sendClaudeEvent(event.sender, {
           type: 'tool-input',
           requestId: request.requestId,
           tool: {
             ...tool,
-            input: relativeToolInput(tool.input, cwd),
+            input:
+              toolName === 'mcp__rba__update_findings'
+                ? {}
+                : relativeToolInput(tool.input, cwd),
           },
         });
       },
@@ -221,6 +249,16 @@ async function startClaudeRequest(event, request) {
           requestId: request.requestId,
           tool,
         });
+        const markdown = pendingFindings.get(tool.id);
+        if (!tool.isError && markdown !== undefined) {
+          sendClaudeEvent(event.sender, {
+            type: 'findings-updated',
+            requestId: request.requestId,
+            markdown,
+          });
+        }
+        pendingFindings.delete(tool.id);
+        toolNames.delete(tool.id);
       },
     });
 
@@ -353,9 +391,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  explorationStore = new ExplorationStore(
-    path.join(app.getPath('userData'), 'explorations.sqlite3'),
+  explorationDatabase = path.join(
+    app.getPath('userData'),
+    'explorations.sqlite3',
   );
+  explorationStore = new ExplorationStore(explorationDatabase);
   createWindow();
 
   app.on('activate', () => {

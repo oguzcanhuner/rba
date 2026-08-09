@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useDefaultLayout } from 'react-resizable-panels';
 import plusIcon from './assets/plus.svg';
 import sidebarCollapseIcon from './assets/sidebar-collapse.svg';
 import type {
@@ -17,6 +18,11 @@ import type {
 } from './claude';
 import { MarkdownContent } from './components/MarkdownContent';
 import { Button } from './components/ui/button';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from './components/ui/resizable';
 import { Textarea } from './components/ui/textarea';
 
 function statusLabel(message: DisplayMessage) {
@@ -32,7 +38,14 @@ function statusLabel(message: DisplayMessage) {
 }
 
 function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
-  const action = tool.name === 'Glob' ? 'list files' : 'read file';
+  const action =
+    tool.name === 'Glob'
+      ? 'list files'
+      : tool.name === 'mcp__rba__update_findings'
+        ? 'update findings'
+        : tool.name === 'mcp__rba__read_findings'
+          ? 'read findings'
+          : 'read file';
 
   if (tool.status === 'running') {
     return `${action[0].toUpperCase()}${action.slice(1)}…`;
@@ -46,7 +59,17 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
     return `Could not ${action}`;
   }
 
-  return tool.name === 'Glob' ? 'Listed files' : 'Read file';
+  if (tool.name === 'Glob') {
+    return 'Listed files';
+  }
+
+  if (tool.name === 'mcp__rba__update_findings') {
+    return 'Updated findings';
+  }
+
+  return tool.name === 'mcp__rba__read_findings'
+    ? 'Read findings'
+    : 'Read file';
 }
 
 function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
@@ -95,6 +118,7 @@ function explorationTitle(message: string) {
 function summaryOf(exploration: Exploration): ExplorationSummary {
   const {
     agentSession: _agentSession,
+    findingsMarkdown: _findingsMarkdown,
     messages: _messages,
     ...summary
   } = exploration;
@@ -135,6 +159,11 @@ function updateAssistant(
 }
 
 export function App() {
+  const workspaceLayout = useDefaultLayout({
+    id: 'rba.exploration-workspace',
+    panelIds: ['findings', 'chat'],
+    storage: window.localStorage,
+  });
   const [explorations, setExplorations] = useState<ExplorationSummary[]>([]);
   const [activeExploration, setActiveExploration] =
     useState<Exploration | null>(null);
@@ -209,6 +238,19 @@ export function App() {
 
   useEffect(() => {
     const handleEvent = (event: ClaudeStreamEvent) => {
+      if (event.type === 'findings-updated') {
+        setActiveExploration((current) =>
+          current
+            ? {
+                ...current,
+                findingsMarkdown: event.markdown,
+                updatedAt: new Date().toISOString(),
+              }
+            : current,
+        );
+        return;
+      }
+
       if (event.type === 'text-delta') {
         setActiveExploration((current) =>
           current
@@ -355,7 +397,7 @@ export function App() {
     }
   }, [messages]);
 
-  function submitMessage(event: FormEvent<HTMLFormElement>) {
+  async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const content = draft.trim();
@@ -392,6 +434,7 @@ export function App() {
           title: explorationTitle(content),
           workingDirectory,
           agentSession: null,
+          findingsMarkdown: null,
           messages: [userMessage, assistantMessage],
           createdAt: now,
           updatedAt: now,
@@ -401,14 +444,29 @@ export function App() {
     setDraft('');
     setError(null);
     setActiveRequestId(requestId);
-    window.claude.start({
-      requestId,
-      prompt: content,
-      cwd: workingDirectory,
-      ...(exploration.agentSession?.provider === 'claude'
-        ? { sessionId: exploration.agentSession.externalId }
-        : {}),
-    });
+    try {
+      await window.explorations.save(exploration);
+      window.claude.start({
+        requestId,
+        explorationId: exploration.id,
+        prompt: content,
+        cwd: workingDirectory,
+        ...(exploration.agentSession?.provider === 'claude'
+          ? { sessionId: exploration.agentSession.externalId }
+          : {}),
+      });
+    } catch {
+      setActiveRequestId(null);
+      setActiveExploration((current) =>
+        current
+          ? updateAssistant(current, requestId, (message) => ({
+              ...message,
+              status: 'error',
+            }))
+          : current,
+      );
+      setError('This exploration could not be saved.');
+    }
   }
 
   async function persistCurrentExploration() {
@@ -562,127 +620,158 @@ export function App() {
         )}
       </aside>
 
-      <section className="chat">
-        <header className="chat__header">
-          <h1>{activeExploration?.title ?? 'RBA'}</h1>
-          <span>Sonnet</span>
-        </header>
-
-        <section className="messages" aria-live="polite">
-          {messages.length === 0 ? (
-            <div className="empty-state">
-              <h2>What would you like to explore?</h2>
-              <p>Describe a feature, problem, or idea to begin.</p>
+      <ResizablePanelGroup
+        className="workspace"
+        defaultLayout={workspaceLayout.defaultLayout}
+        id="rba.exploration-workspace"
+        onLayoutChanged={workspaceLayout.onLayoutChanged}
+        orientation="horizontal"
+      >
+        <ResizablePanel defaultSize={55} id="findings" minSize={30}>
+          <aside className="findings" aria-label="Exploration findings">
+            <header className="findings__header">
+              <h2>Findings</h2>
+            </header>
+            <div className="findings__content" aria-live="polite">
+              {activeExploration?.findingsMarkdown ? (
+                <MarkdownContent className="typeset-findings">
+                  {activeExploration.findingsMarkdown}
+                </MarkdownContent>
+              ) : (
+                <p className="findings__empty">
+                  Findings will appear here as the exploration develops.
+                </p>
+              )}
             </div>
-          ) : (
-            messages.map((message) => {
-              const label = statusLabel(message);
+          </aside>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={45} id="chat" minSize={30}>
+          <section className="chat">
+            <header className="chat__header">
+              <h1>{activeExploration?.title ?? 'RBA'}</h1>
+              <span>Sonnet</span>
+            </header>
 
-              return (
-                <article
-                  className={`message message--${message.role}`}
-                  key={message.id}
-                >
-                  <div className="message__role">
-                    {message.role === 'user' ? 'You' : 'RBA'}
-                  </div>
-                  {message.parts.length > 0 ? (
-                    message.parts.map((part) => {
-                      if (part.type === 'text') {
-                        if (message.role === 'assistant') {
+            <section className="messages" aria-live="polite">
+              {messages.length === 0 ? (
+                <div className="empty-state">
+                  <h2>What would you like to explore?</h2>
+                  <p>Describe a feature, problem, or idea to begin.</p>
+                </div>
+              ) : (
+                messages.map((message) => {
+                  const label = statusLabel(message);
+
+                  return (
+                    <article
+                      className={`message message--${message.role}`}
+                      key={message.id}
+                    >
+                      <div className="message__role">
+                        {message.role === 'user' ? 'You' : 'RBA'}
+                      </div>
+                      {message.parts.length > 0 ? (
+                        message.parts.map((part) => {
+                          if (part.type === 'text') {
+                            if (message.role === 'assistant') {
+                              return (
+                                <MarkdownContent
+                                  className="message__part message__content"
+                                  key={part.id}
+                                >
+                                  {part.text}
+                                </MarkdownContent>
+                              );
+                            }
+
+                            return (
+                              <div
+                                className="message__part message__content"
+                                key={part.id}
+                              >
+                                {part.text}
+                              </div>
+                            );
+                          }
+
+                          const tool = part.tool;
+                          const detail = toolDetail(tool);
+
                           return (
-                            <MarkdownContent
-                              className="message__part message__content"
-                              key={part.id}
+                            <div
+                              className={`message__part tool-use tool-use--${tool.status}`}
+                              key={tool.id}
                             >
-                              {part.text}
-                            </MarkdownContent>
+                              <span className="tool-use__indicator" />
+                              <span className="tool-use__label">
+                                {toolLabel(tool)}
+                              </span>
+                              {detail && (
+                                <code className="tool-use__detail">
+                                  {detail}
+                                </code>
+                              )}
+                            </div>
                           );
-                        }
-
-                        return (
-                          <div
-                            className="message__part message__content"
-                            key={part.id}
-                          >
-                            {part.text}
-                          </div>
-                        );
-                      }
-
-                      const tool = part.tool;
-                      const detail = toolDetail(tool);
-
-                      return (
-                        <div
-                          className={`message__part tool-use tool-use--${tool.status}`}
-                          key={tool.id}
-                        >
-                          <span className="tool-use__indicator" />
-                          <span className="tool-use__label">
-                            {toolLabel(tool)}
-                          </span>
-                          {detail && (
-                            <code className="tool-use__detail">{detail}</code>
-                          )}
+                        })
+                      ) : (
+                        <div className="message__content">
+                          <span className="thinking">Thinking…</span>
                         </div>
-                      );
-                    })
-                  ) : (
-                    <div className="message__content">
-                      <span className="thinking">Thinking…</span>
-                    </div>
-                  )}
-                  {label && <div className="message__status">{label}</div>}
-                </article>
-              );
-            })
-          )}
-          <div ref={endOfMessages} />
-        </section>
+                      )}
+                      {label && <div className="message__status">{label}</div>}
+                    </article>
+                  );
+                })
+              )}
+              <div ref={endOfMessages} />
+            </section>
 
-        <footer className="composer-area">
-          {error && <div className="error-message">{error}</div>}
-          <div className="working-directory">
-            <span title={workingDirectory ?? undefined}>
-              Working directory: {workingDirectory ?? 'Loading…'}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              disabled={activeRequestId !== null}
-              onClick={chooseWorkingDirectory}
-            >
-              Choose folder
-            </Button>
-          </div>
-          <form className="composer" onSubmit={submitMessage}>
-            <Textarea
-              className="composer__input"
-              aria-label="Message RBA"
-              disabled={activeRequestId !== null}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              placeholder="Message RBA"
-              rows={3}
-              value={draft}
-            />
-            {activeRequestId && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={cancelResponse}
-              >
-                Stop
-              </Button>
-            )}
-          </form>
-          <p className="composer-hint">
-            Enter to send · Shift+Enter for a new line
-          </p>
-        </footer>
-      </section>
+            <footer className="composer-area">
+              {error && <div className="error-message">{error}</div>}
+              <div className="working-directory">
+                <span title={workingDirectory ?? undefined}>
+                  Working directory: {workingDirectory ?? 'Loading…'}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  disabled={activeRequestId !== null}
+                  onClick={chooseWorkingDirectory}
+                >
+                  Choose folder
+                </Button>
+              </div>
+              <form className="composer" onSubmit={submitMessage}>
+                <Textarea
+                  className="composer__input"
+                  aria-label="Message RBA"
+                  disabled={activeRequestId !== null}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  placeholder="Message RBA"
+                  rows={3}
+                  value={draft}
+                />
+                {activeRequestId && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={cancelResponse}
+                  >
+                    Stop
+                  </Button>
+                )}
+              </form>
+              <p className="composer-hint">
+                Enter to send · Shift+Enter for a new line
+              </p>
+            </footer>
+          </section>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </main>
   );
 }

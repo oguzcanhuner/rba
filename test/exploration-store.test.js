@@ -1,4 +1,8 @@
 const assert = require('node:assert/strict');
+const { mkdtempSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 const { test } = require('node:test');
 const { ExplorationStore } = require('../exploration-store');
 
@@ -8,6 +12,7 @@ function exploration(overrides = {}) {
     title: 'Plan persistent conversations',
     workingDirectory: '/workspace',
     agentSession: null,
+    findingsMarkdown: null,
     messages: [
       {
         id: 'message-1',
@@ -102,5 +107,76 @@ test('stores provider-neutral agent sessions and message updates', () => {
   store.save(switchedProvider);
 
   assert.deepEqual(store.get(initial.id), switchedProvider);
+  store.close();
+});
+
+test('persists findings as part of an exploration', () => {
+  const store = new ExplorationStore(':memory:');
+  store.save(
+    exploration({ findingsMarkdown: '# Findings\n\nA durable decision.' }),
+  );
+
+  assert.equal(
+    store.get('exploration-1').findingsMarkdown,
+    '# Findings\n\nA durable decision.',
+  );
+  store.close();
+});
+
+test('records each applied schema migration', () => {
+  const store = new ExplorationStore(':memory:');
+
+  assert.deepEqual(
+    store.database
+      .prepare('SELECT version FROM schema_migrations ORDER BY version')
+      .all()
+      .map(({ version }) => version),
+    [1, 2],
+  );
+  store.close();
+});
+
+test('repairs a missing findings column even when migration 2 is marked complete', (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-store-test-'));
+  const filename = path.join(directory, 'explorations.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+
+  const oldDatabase = new DatabaseSync(filename);
+  oldDatabase.exec(`
+    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
+    INSERT INTO schema_migrations(version) VALUES (2);
+    CREATE TABLE explorations (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      working_directory TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO explorations VALUES (
+      'existing',
+      'Existing exploration',
+      '/workspace',
+      '2026-08-09T10:00:00.000Z',
+      '2026-08-09T10:00:00.000Z'
+    );
+  `);
+  oldDatabase.close();
+
+  const store = new ExplorationStore(filename);
+  assert.equal(store.get('existing').findingsMarkdown, null);
+  assert.equal(
+    store.database
+      .prepare('PRAGMA table_info(explorations)')
+      .all()
+      .some((column) => column.name === 'findings_markdown'),
+    true,
+  );
+  assert.deepEqual(
+    store.database
+      .prepare('SELECT version FROM schema_migrations ORDER BY version')
+      .all()
+      .map(({ version }) => version),
+    [1, 2],
+  );
   store.close();
 });
