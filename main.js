@@ -4,14 +4,24 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
 const { ExplorationStore } = require('./exploration-store');
+const { WorkerService } = require('./worker-service');
 
 const activeRequests = new Map();
 let explorationStore;
 let explorationDatabase;
+let workerService;
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
     webContents.send('claude:event', payload);
+  }
+}
+
+function broadcastWorker(run) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send('workers:event', { type: 'worker-updated', run });
+    }
   }
 }
 
@@ -104,7 +114,14 @@ function isValidExploration(exploration) {
           task.title.length <= 200 &&
           typeof task.specMarkdown === 'string' &&
           task.specMarkdown.length <= 500_000 &&
-          ['draft', 'queued'].includes(task.status) &&
+          [
+            'draft',
+            'queued',
+            'working',
+            'completed',
+            'stopped',
+            'failed',
+          ].includes(task.status) &&
           typeof task.createdAt === 'string' &&
           typeof task.updatedAt === 'string',
       ) &&
@@ -414,6 +431,42 @@ ipcMain.handle('explorations:commit-tasks', (event, explorationId) => {
   return explorationStore.commitTasks(explorationId);
 });
 
+ipcMain.handle('workers:get', (event, taskId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100
+  ) {
+    throw new Error('Invalid worker request.');
+  }
+  return explorationStore.getWorkerRun(taskId);
+});
+
+ipcMain.handle('workers:start', async (event, taskId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100
+  ) {
+    throw new Error('Invalid worker request.');
+  }
+  return workerService.start(taskId);
+});
+
+ipcMain.handle('workers:stop', (event, taskId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100
+  ) {
+    throw new Error('Invalid worker request.');
+  }
+  return workerService.stop(taskId);
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
@@ -447,6 +500,12 @@ app.whenReady().then(() => {
     'explorations.sqlite3',
   );
   explorationStore = new ExplorationStore(explorationDatabase);
+  explorationStore.interruptWorkingRuns();
+  workerService = new WorkerService({
+    store: explorationStore,
+    worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
+    onUpdate: broadcastWorker,
+  });
   createWindow();
 
   app.on('activate', () => {
@@ -457,6 +516,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  workerService?.shutdown();
   explorationStore?.close();
 });
 

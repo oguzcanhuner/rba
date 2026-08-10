@@ -193,7 +193,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3],
+    [1, 2, 3, 4],
   );
   store.close();
 });
@@ -238,7 +238,109 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3],
+    [1, 2, 3, 4],
   );
+  store.close();
+});
+
+test('persists a worker run and its conversation', () => {
+  const store = new ExplorationStore(':memory:');
+  store.save(exploration());
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, exploration_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-1',
+      'exploration-1',
+      1,
+      'Implement workers',
+      'Build the worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.saveWorkerMessage('task-1', {
+    id: 'worker-task-1',
+    role: 'assistant',
+    status: 'streaming',
+    parts: [{ type: 'text', id: 'part-1', text: 'Working.' }],
+  });
+  const completed = store.updateWorkerRun('task-1', {
+    status: 'completed',
+    sessionId: 'session-1',
+  });
+
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.sessionId, 'session-1');
+  assert.equal(completed.messages[0].parts[0].text, 'Working.');
+  assert.equal(store.get('exploration-1').tasks[0].status, 'completed');
+  assert.throws(
+    () =>
+      store.createWorkerRun('task-1', {
+        branch: 'another',
+        worktree: '/another',
+        startedAt: '2026-08-09T10:03:00.000Z',
+      }),
+    /queued/,
+  );
+  store.close();
+});
+
+test('marks unfinished workers and tool activity as failed on restart', () => {
+  const store = new ExplorationStore(':memory:');
+  store.save(exploration());
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, exploration_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, 1, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-1',
+      'exploration-1',
+      'Implement workers',
+      'Build the worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.saveWorkerMessage('task-1', {
+    id: 'worker-task-1',
+    role: 'assistant',
+    status: 'streaming',
+    parts: [
+      {
+        type: 'tool',
+        tool: {
+          id: 'tool-1',
+          name: 'Read',
+          input: null,
+          status: 'running',
+        },
+      },
+    ],
+  });
+
+  store.interruptWorkingRuns();
+
+  const run = store.getWorkerRun('task-1');
+  assert.equal(run.status, 'failed');
+  assert.match(run.error, /stopped before/);
+  assert.equal(run.messages[0].status, 'error');
+  assert.equal(run.messages[0].parts[0].tool.status, 'error');
   store.close();
 });

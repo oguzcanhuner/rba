@@ -86,7 +86,13 @@ export type ExplorationSummary = {
   updatedAt: string;
 };
 
-export type TaskStatus = 'draft' | 'queued';
+export type TaskStatus =
+  | 'draft'
+  | 'queued'
+  | 'working'
+  | 'completed'
+  | 'stopped'
+  | 'failed';
 
 export type Task = {
   id: string;
@@ -105,6 +111,22 @@ export type Exploration = ExplorationSummary & {
   messages: DisplayMessage[];
 };
 
+export type WorkerRun = {
+  taskId: string;
+  explorationId: string;
+  title: string;
+  status: Exclude<TaskStatus, 'draft' | 'queued'>;
+  branch: string;
+  worktree: string;
+  sessionId: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  messages: DisplayMessage[];
+};
+
+export type WorkerEvent = { type: 'worker-updated'; run: WorkerRun };
+
 declare global {
   interface Window {
     claude: {
@@ -119,6 +141,12 @@ declare global {
       get(id: string): Promise<Exploration | null>;
       save(exploration: Exploration): Promise<void>;
       commitTasks(explorationId: string): Promise<Task[]>;
+    };
+    workers: {
+      get(taskId: string): Promise<WorkerRun | null>;
+      start(taskId: string): Promise<WorkerRun>;
+      stop(taskId: string): Promise<WorkerRun>;
+      onEvent(callback: (event: WorkerEvent) => void): () => void;
     };
   }
 }

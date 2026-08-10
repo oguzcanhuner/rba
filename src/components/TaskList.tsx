@@ -6,9 +6,17 @@ type TaskListProps = {
   tasks: Task[];
   commitDisabled: boolean;
   onCommit: () => void;
+  onOpenWorker: (task: Task) => void;
+  onStartWorker: (task: Task) => void;
 };
 
-export function TaskList({ tasks, commitDisabled, onCommit }: TaskListProps) {
+export function TaskList({
+  tasks,
+  commitDisabled,
+  onCommit,
+  onOpenWorker,
+  onStartWorker,
+}: TaskListProps) {
   const draftCount = tasks.filter((task) => task.status === 'draft').length;
 
   return (
@@ -52,6 +60,29 @@ export function TaskList({ tasks, commitDisabled, onCommit }: TaskListProps) {
                   </MarkdownContent>
                 ) : (
                   <p>No specification.</p>
+                )}
+                {task.status !== 'draft' && (
+                  <div className="task__actions">
+                    {task.status === 'queued' ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={commitDisabled}
+                        onClick={() => onStartWorker(task)}
+                      >
+                        Start task
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => onOpenWorker(task)}
+                      >
+                        Open worker
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
             </details>

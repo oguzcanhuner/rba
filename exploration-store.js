@@ -98,6 +98,40 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 4,
+    isApplied(database) {
+      return ['worker_runs', 'worker_messages'].every((table) =>
+        hasTable(database, table),
+      );
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS worker_runs (
+          task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+          status TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          worktree TEXT NOT NULL,
+          session_id TEXT,
+          error TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS worker_messages (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          status TEXT NOT NULL,
+          parts_json TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS worker_messages_by_task
+          ON worker_messages(task_id, position);
+      `);
+    },
+  },
 ];
 
 function migrate(database) {
@@ -306,6 +340,192 @@ class ExplorationStore {
       }
       this.database.exec('COMMIT');
       return this.listTasks(explorationId);
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  getTaskForWorker(taskId) {
+    const row = this.database
+      .prepare(`
+        SELECT
+          t.id,
+          t.exploration_id AS explorationId,
+          t.title,
+          t.spec_markdown AS specMarkdown,
+          t.status,
+          e.working_directory AS workingDirectory,
+          e.findings_markdown AS findingsMarkdown
+        FROM tasks t
+        JOIN explorations e ON e.id = t.exploration_id
+        WHERE t.id = ?
+      `)
+      .get(taskId);
+    return row ? { ...row } : null;
+  }
+
+  createWorkerRun(taskId, { branch, worktree, startedAt }) {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const task = this.database
+        .prepare('SELECT status FROM tasks WHERE id = ?')
+        .get(taskId);
+      if (!task) {
+        throw new Error('The task no longer exists.');
+      }
+      if (task.status !== 'queued') {
+        throw new Error('Only queued tasks can be started.');
+      }
+
+      this.database
+        .prepare(`
+          INSERT INTO worker_runs (
+            task_id, status, branch, worktree, started_at
+          ) VALUES (?, 'working', ?, ?, ?)
+        `)
+        .run(taskId, branch, worktree, startedAt);
+      this.database
+        .prepare(
+          `UPDATE tasks SET status = 'working', updated_at = ? WHERE id = ?`,
+        )
+        .run(startedAt, taskId);
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+    return this.getWorkerRun(taskId);
+  }
+
+  saveWorkerMessage(taskId, message, position = 0) {
+    this.database
+      .prepare(`
+        INSERT INTO worker_messages (
+          id, task_id, position, role, status, parts_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          position = excluded.position,
+          role = excluded.role,
+          status = excluded.status,
+          parts_json = excluded.parts_json
+      `)
+      .run(
+        message.id,
+        taskId,
+        position,
+        message.role,
+        message.status,
+        JSON.stringify(message.parts),
+      );
+  }
+
+  updateWorkerRun(taskId, { status, sessionId = null, error = null }) {
+    const now = new Date().toISOString();
+    const finishedAt = status === 'working' ? null : now;
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const result = this.database
+        .prepare(`
+          UPDATE worker_runs
+          SET status = ?, session_id = COALESCE(?, session_id),
+              error = ?, finished_at = ?
+          WHERE task_id = ?
+        `)
+        .run(status, sessionId, error, finishedAt, taskId);
+      if (result.changes === 0) {
+        throw new Error('The worker no longer exists.');
+      }
+      this.database
+        .prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?')
+        .run(status, now, taskId);
+      this.database.exec('COMMIT');
+    } catch (updateError) {
+      this.database.exec('ROLLBACK');
+      throw updateError;
+    }
+    return this.getWorkerRun(taskId);
+  }
+
+  getWorkerRun(taskId) {
+    const run = this.database
+      .prepare(`
+        SELECT
+          w.task_id AS taskId,
+          t.exploration_id AS explorationId,
+          t.title,
+          w.status,
+          w.branch,
+          w.worktree,
+          w.session_id AS sessionId,
+          w.error,
+          w.started_at AS startedAt,
+          w.finished_at AS finishedAt
+        FROM worker_runs w
+        JOIN tasks t ON t.id = w.task_id
+        WHERE w.task_id = ?
+      `)
+      .get(taskId);
+    if (!run) {
+      return null;
+    }
+
+    const messages = this.database
+      .prepare(`
+        SELECT id, role, status, parts_json AS partsJson
+        FROM worker_messages
+        WHERE task_id = ?
+        ORDER BY position
+      `)
+      .all(taskId)
+      .map(({ partsJson, ...message }) => ({
+        ...message,
+        parts: JSON.parse(partsJson),
+      }));
+    return { ...run, messages };
+  }
+
+  interruptWorkingRuns() {
+    const now = new Date().toISOString();
+    const failureMessage = 'RBA stopped before this worker finished.';
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const interruptedMessages = this.database
+        .prepare(`
+          SELECT m.id, m.parts_json AS partsJson
+          FROM worker_messages m
+          JOIN worker_runs w ON w.task_id = m.task_id
+          WHERE w.status = 'working'
+        `)
+        .all();
+      const updateMessage = this.database.prepare(`
+        UPDATE worker_messages
+        SET status = 'error', parts_json = ?
+        WHERE id = ?
+      `);
+      for (const { id, partsJson } of interruptedMessages) {
+        const parts = JSON.parse(partsJson).map((part) =>
+          part.type === 'tool' && part.tool.status === 'running'
+            ? { ...part, tool: { ...part.tool, status: 'error' } }
+            : part,
+        );
+        updateMessage.run(JSON.stringify(parts), id);
+      }
+      this.database
+        .prepare(`
+          UPDATE worker_runs
+          SET status = 'failed', error = ?, finished_at = ?
+          WHERE status = 'working'
+        `)
+        .run(failureMessage, now);
+      this.database
+        .prepare(`
+          UPDATE tasks
+          SET status = 'failed', updated_at = ?
+          WHERE status = 'working'
+        `)
+        .run(now);
+      this.database.exec('COMMIT');
     } catch (error) {
       this.database.exec('ROLLBACK');
       throw error;

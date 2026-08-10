@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { test } = require('node:test');
-const { beginClaudeCli } = require('../claude-cli-service');
+const { beginClaudeCli, beginWorkerCli } = require('../claude-cli-service');
 
 function fakeProcess() {
   const child = new EventEmitter();
@@ -221,4 +221,44 @@ test('reports tool input and completion from Claude CLI output', async () => {
     },
   ]);
   assert.deepEqual(await response.completion, { sessionId: 'session-123' });
+});
+
+test('starts an autonomous worker with write and command tools', async () => {
+  const child = fakeProcess();
+  let args;
+  const response = beginWorkerCli({
+    prompt: 'Implement the task',
+    cwd: '/worktree',
+    onText: () => {},
+    spawnProcess: (_command, receivedArgs) => {
+      args = receivedArgs;
+      return child;
+    },
+  });
+
+  assert.equal(
+    args[args.indexOf('--tools') + 1],
+    'Glob,Grep,Read,Edit,Write,Bash',
+  );
+  assert.equal(
+    args[args.indexOf('--allowedTools') + 1],
+    'Glob,Grep,Read,Edit,Write,Bash',
+  );
+  assert.match(
+    args[args.indexOf('--append-system-prompt') + 1],
+    /autonomous implementation worker/,
+  );
+  assert.equal(args.includes('--mcp-config'), false);
+
+  child.stdout.write(
+    `${JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      session_id: 'worker-session',
+    })}\n`,
+  );
+  child.emit('close', 0);
+  assert.deepEqual(await response.completion, {
+    sessionId: 'worker-session',
+  });
 });

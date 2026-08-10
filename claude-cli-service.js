@@ -13,6 +13,14 @@ Tasks are draft-first and are the authoritative decomposition. Once the approach
 Do not write or modify files. Do not claim implementation has been completed.`;
 }
 
+function workerPrompt() {
+  return `You are an autonomous implementation worker. Complete the task you are given in the current git worktree.
+
+Read the repository instructions and existing code before changing anything. Keep the work scoped to the task, implement it fully, and run the relevant automated checks. You may edit files and run commands inside the worktree. Do not push branches, create merge requests, or modify anything outside the worktree.
+
+Work independently until the task is complete. If you cannot continue safely, explain the blocker clearly and stop. End with a concise summary of what you changed and the checks you ran.`;
+}
+
 class ClaudeCliError extends Error {
   constructor(code, message) {
     super(message);
@@ -20,13 +28,14 @@ class ClaudeCliError extends Error {
   }
 }
 
-function beginClaudeCli({
+function beginClaudeProcess({
   prompt,
   sessionId,
   cwd,
-  findingsServer,
-  explorationDatabase,
-  explorationId,
+  systemPrompt,
+  tools,
+  allowedTools,
+  extraArgs = [],
   onText,
   onToolStart = () => {},
   onToolInput = () => {},
@@ -34,19 +43,6 @@ function beginClaudeCli({
   spawnProcess = spawn,
   environment = process.env,
 }) {
-  const mcpConfig = {
-    mcpServers: {
-      rba: {
-        command: findingsServer.command,
-        args: [findingsServer.script],
-        env: {
-          ...findingsServer.env,
-          RBA_EXPLORATION_DATABASE: explorationDatabase,
-          RBA_EXPLORATION_ID: explorationId,
-        },
-      },
-    },
-  };
   const args = [
     '-p',
     prompt,
@@ -55,22 +51,12 @@ function beginClaudeCli({
     '--include-partial-messages',
     '--verbose',
     '--append-system-prompt',
-    planningPrompt(),
-    '--mcp-config',
-    JSON.stringify(mcpConfig),
-    '--strict-mcp-config',
+    systemPrompt,
+    ...extraArgs,
     '--tools',
-    'Glob,Read',
+    tools,
     '--allowedTools',
-    [
-      'mcp__rba__read_findings',
-      'mcp__rba__update_findings',
-      'mcp__rba__read_tasks',
-      'mcp__rba__add_task',
-      'mcp__rba__update_task',
-      'mcp__rba__remove_task',
-      'mcp__rba__commit_tasks',
-    ].join(','),
+    allowedTools,
     '--permission-mode',
     'dontAsk',
     '--model',
@@ -238,7 +224,56 @@ function beginClaudeCli({
   };
 }
 
+function beginClaudeCli(options) {
+  const mcpConfig = {
+    mcpServers: {
+      rba: {
+        command: options.findingsServer.command,
+        args: [options.findingsServer.script],
+        env: {
+          ...options.findingsServer.env,
+          RBA_EXPLORATION_DATABASE: options.explorationDatabase,
+          RBA_EXPLORATION_ID: options.explorationId,
+        },
+      },
+    },
+  };
+
+  return beginClaudeProcess({
+    ...options,
+    systemPrompt: planningPrompt(),
+    tools: 'Glob,Read',
+    allowedTools: [
+      'mcp__rba__read_findings',
+      'mcp__rba__update_findings',
+      'mcp__rba__read_tasks',
+      'mcp__rba__add_task',
+      'mcp__rba__update_task',
+      'mcp__rba__remove_task',
+      'mcp__rba__commit_tasks',
+    ].join(','),
+    extraArgs: [
+      '--mcp-config',
+      JSON.stringify(mcpConfig),
+      '--strict-mcp-config',
+    ],
+  });
+}
+
+function beginWorkerCli(options) {
+  const workerTools = ['Glob', 'Grep', 'Read', 'Edit', 'Write', 'Bash'].join(
+    ',',
+  );
+  return beginClaudeProcess({
+    ...options,
+    systemPrompt: workerPrompt(),
+    tools: workerTools,
+    allowedTools: workerTools,
+  });
+}
+
 module.exports = {
   beginClaudeCli,
+  beginWorkerCli,
   ClaudeCliError,
 };

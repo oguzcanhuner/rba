@@ -17,6 +17,7 @@ import type {
   ExplorationSummary,
   Task,
   ToolStatus,
+  WorkerRun,
 } from './claude';
 import { MarkdownContent } from './components/MarkdownContent';
 import { TaskList } from './components/TaskList';
@@ -27,6 +28,7 @@ import {
   ResizablePanelGroup,
 } from './components/ui/resizable';
 import { Textarea } from './components/ui/textarea';
+import { WorkerScreen } from './components/WorkerScreen';
 
 function statusLabel(message: DisplayMessage) {
   if (message.status === 'cancelled') {
@@ -195,6 +197,8 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
+  const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesContainer = useRef<HTMLElement>(null);
   const shouldFollowMessages = useRef(true);
@@ -430,6 +434,33 @@ export function App() {
     return window.claude.onEvent(handleEvent);
   }, []);
 
+  useEffect(
+    () =>
+      window.workers.onEvent((event) => {
+        const { run } = event;
+        setActiveExploration((current) =>
+          current?.id === run.explorationId
+            ? {
+                ...current,
+                tasks: current.tasks.map((task) =>
+                  task.id === run.taskId
+                    ? {
+                        ...task,
+                        status: run.status,
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : task,
+                ),
+              }
+            : current,
+        );
+        setActiveWorker((current) =>
+          current?.taskId === run.taskId ? run : current,
+        );
+      }),
+    [],
+  );
+
   useEffect(() => {
     const explorationId = activeExploration?.id ?? null;
     if (explorationId !== previousExplorationId.current) {
@@ -530,6 +561,7 @@ export function App() {
         await persistCurrentExploration();
         setWorkingDirectory(directory);
         setActiveExploration(null);
+        setActiveWorker(null);
         setDraft('');
         setError(null);
       }
@@ -551,6 +583,7 @@ export function App() {
         const restored = restoreInterruptedMessages(exploration);
         setActiveExploration(restored);
         setWorkingDirectory(restored.workingDirectory);
+        setActiveWorker(null);
         setDraft('');
         setError(null);
       }
@@ -567,6 +600,7 @@ export function App() {
     try {
       await persistCurrentExploration();
       setActiveExploration(null);
+      setActiveWorker(null);
       setDraft('');
       setError(null);
     } catch {
@@ -607,6 +641,59 @@ export function App() {
       );
     } catch {
       setError('Tasks could not be queued.');
+    }
+  }
+
+  async function startWorker(task: Task) {
+    setStartingTaskId(task.id);
+    setError(null);
+    try {
+      const run = await window.workers.start(task.id);
+      setActiveExploration((current) =>
+        current
+          ? {
+              ...current,
+              tasks: current.tasks.map((currentTask) =>
+                currentTask.id === task.id
+                  ? { ...currentTask, status: run.status }
+                  : currentTask,
+              ),
+            }
+          : current,
+      );
+      setActiveWorker(run);
+    } catch {
+      setError(
+        'This task could not be started. Make sure the folder is a git repository.',
+      );
+    } finally {
+      setStartingTaskId(null);
+    }
+  }
+
+  async function openWorker(task: Task) {
+    setError(null);
+    try {
+      const run = await window.workers.get(task.id);
+      if (run) {
+        setActiveWorker(run);
+      } else {
+        setError('This worker could not be loaded.');
+      }
+    } catch {
+      setError('This worker could not be loaded.');
+    }
+  }
+
+  async function stopWorker() {
+    if (activeWorker?.status !== 'working') {
+      return;
+    }
+    try {
+      const run = await window.workers.stop(activeWorker.taskId);
+      setActiveWorker(run);
+    } catch {
+      setError('This worker could not be stopped.');
     }
   }
 
@@ -686,192 +773,206 @@ export function App() {
         )}
       </aside>
 
-      <ResizablePanelGroup
-        className="workspace"
-        defaultLayout={workspaceLayout.defaultLayout}
-        id="rba.exploration-workspace"
-        onLayoutChanged={workspaceLayout.onLayoutChanged}
-        orientation="horizontal"
-      >
-        <ResizablePanel defaultSize={55} id="findings" minSize={30}>
-          <aside className="findings" aria-label="Exploration findings">
-            <header className="findings__header">
-              <h2>Findings</h2>
-            </header>
-            <div className="findings__content" aria-live="polite">
-              <div
-                className={`findings__document${activeExploration?.findingsMarkdown ? '' : ' findings__document--empty'}`}
-              >
-                {activeExploration?.findingsMarkdown ? (
-                  <MarkdownContent className="typeset-findings">
-                    {activeExploration.findingsMarkdown}
-                  </MarkdownContent>
-                ) : (
-                  <div className="findings-empty">
-                    <img
-                      className="findings-empty__graphic"
-                      src={findingsEmptyIcon}
-                      alt=""
-                      aria-hidden="true"
-                    />
-                    <div className="findings-empty__copy">
-                      <h3>Findings will take shape here</h3>
-                      <p>
-                        As you explore, key insights and decisions will be
-                        gathered into a clear, evolving summary.
-                      </p>
+      {activeWorker ? (
+        <WorkerScreen
+          run={activeWorker}
+          onBack={() => setActiveWorker(null)}
+          onStop={stopWorker}
+        />
+      ) : (
+        <ResizablePanelGroup
+          className="workspace"
+          defaultLayout={workspaceLayout.defaultLayout}
+          id="rba.exploration-workspace"
+          onLayoutChanged={workspaceLayout.onLayoutChanged}
+          orientation="horizontal"
+        >
+          <ResizablePanel defaultSize={55} id="findings" minSize={30}>
+            <aside className="findings" aria-label="Exploration findings">
+              <header className="findings__header">
+                <h2>Findings</h2>
+              </header>
+              <div className="findings__content" aria-live="polite">
+                <div
+                  className={`findings__document${activeExploration?.findingsMarkdown ? '' : ' findings__document--empty'}`}
+                >
+                  {activeExploration?.findingsMarkdown ? (
+                    <MarkdownContent className="typeset-findings">
+                      {activeExploration.findingsMarkdown}
+                    </MarkdownContent>
+                  ) : (
+                    <div className="findings-empty">
+                      <img
+                        className="findings-empty__graphic"
+                        src={findingsEmptyIcon}
+                        alt=""
+                        aria-hidden="true"
+                      />
+                      <div className="findings-empty__copy">
+                        <h3>Findings will take shape here</h3>
+                        <p>
+                          As you explore, key insights and decisions will be
+                          gathered into a clear, evolving summary.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
+                </div>
+                {activeExploration && (
+                  <TaskList
+                    tasks={activeExploration.tasks}
+                    commitDisabled={
+                      activeRequestId !== null || startingTaskId !== null
+                    }
+                    onCommit={commitTasks}
+                    onOpenWorker={openWorker}
+                    onStartWorker={startWorker}
+                  />
                 )}
               </div>
-              {activeExploration && (
-                <TaskList
-                  tasks={activeExploration.tasks}
-                  commitDisabled={activeRequestId !== null}
-                  onCommit={commitTasks}
-                />
-              )}
-            </div>
-          </aside>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={45} id="chat" minSize={30}>
-          <section className="chat">
-            <header className="chat__header">
-              <h1>{activeExploration?.title ?? 'RBA'}</h1>
-              <span>Sonnet</span>
-            </header>
+            </aside>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={45} id="chat" minSize={30}>
+            <section className="chat">
+              <header className="chat__header">
+                <h1>{activeExploration?.title ?? 'RBA'}</h1>
+                <span>Sonnet</span>
+              </header>
 
-            <section
-              className="messages"
-              aria-live="polite"
-              ref={messagesContainer}
-              onScroll={(event) => {
-                const container = event.currentTarget;
-                const distanceFromEnd =
-                  container.scrollHeight -
-                  container.scrollTop -
-                  container.clientHeight;
-                shouldFollowMessages.current = distanceFromEnd <= 24;
-              }}
-            >
-              {messages.length === 0 ? (
-                <div className="empty-state">
-                  <h2>What would you like to explore?</h2>
-                  <p>Describe a feature, problem, or idea to begin.</p>
-                </div>
-              ) : (
-                messages.map((message) => {
-                  const label = statusLabel(message);
+              <section
+                className="messages"
+                aria-live="polite"
+                ref={messagesContainer}
+                onScroll={(event) => {
+                  const container = event.currentTarget;
+                  const distanceFromEnd =
+                    container.scrollHeight -
+                    container.scrollTop -
+                    container.clientHeight;
+                  shouldFollowMessages.current = distanceFromEnd <= 24;
+                }}
+              >
+                {messages.length === 0 ? (
+                  <div className="empty-state">
+                    <h2>What would you like to explore?</h2>
+                    <p>Describe a feature, problem, or idea to begin.</p>
+                  </div>
+                ) : (
+                  messages.map((message) => {
+                    const label = statusLabel(message);
 
-                  return (
-                    <article
-                      className={`message message--${message.role}`}
-                      key={message.id}
-                    >
-                      <div className="message__role">
-                        {message.role === 'user' ? 'You' : 'RBA'}
-                      </div>
-                      {message.parts.length > 0 ? (
-                        message.parts.map((part) => {
-                          if (part.type === 'text') {
-                            if (message.role === 'assistant') {
+                    return (
+                      <article
+                        className={`message message--${message.role}`}
+                        key={message.id}
+                      >
+                        <div className="message__role">
+                          {message.role === 'user' ? 'You' : 'RBA'}
+                        </div>
+                        {message.parts.length > 0 ? (
+                          message.parts.map((part) => {
+                            if (part.type === 'text') {
+                              if (message.role === 'assistant') {
+                                return (
+                                  <MarkdownContent
+                                    className="message__part message__content"
+                                    key={part.id}
+                                  >
+                                    {part.text}
+                                  </MarkdownContent>
+                                );
+                              }
+
                               return (
-                                <MarkdownContent
+                                <div
                                   className="message__part message__content"
                                   key={part.id}
                                 >
                                   {part.text}
-                                </MarkdownContent>
+                                </div>
                               );
                             }
 
+                            const tool = part.tool;
+                            const detail = toolDetail(tool);
+
                             return (
                               <div
-                                className="message__part message__content"
-                                key={part.id}
+                                className={`message__part tool-use tool-use--${tool.status}`}
+                                key={tool.id}
                               >
-                                {part.text}
+                                <span className="tool-use__indicator" />
+                                <span className="tool-use__label">
+                                  {toolLabel(tool)}
+                                </span>
+                                {detail && (
+                                  <code className="tool-use__detail">
+                                    {detail}
+                                  </code>
+                                )}
                               </div>
                             );
-                          }
+                          })
+                        ) : (
+                          <div className="message__content">
+                            <span className="thinking">Thinking…</span>
+                          </div>
+                        )}
+                        {label && (
+                          <div className="message__status">{label}</div>
+                        )}
+                      </article>
+                    );
+                  })
+                )}
+              </section>
 
-                          const tool = part.tool;
-                          const detail = toolDetail(tool);
-
-                          return (
-                            <div
-                              className={`message__part tool-use tool-use--${tool.status}`}
-                              key={tool.id}
-                            >
-                              <span className="tool-use__indicator" />
-                              <span className="tool-use__label">
-                                {toolLabel(tool)}
-                              </span>
-                              {detail && (
-                                <code className="tool-use__detail">
-                                  {detail}
-                                </code>
-                              )}
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="message__content">
-                          <span className="thinking">Thinking…</span>
-                        </div>
-                      )}
-                      {label && <div className="message__status">{label}</div>}
-                    </article>
-                  );
-                })
-              )}
-            </section>
-
-            <footer className="composer-area">
-              {error && <div className="error-message">{error}</div>}
-              <div className="working-directory">
-                <span title={workingDirectory ?? undefined}>
-                  Working directory: {workingDirectory ?? 'Loading…'}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  disabled={activeRequestId !== null}
-                  onClick={chooseWorkingDirectory}
-                >
-                  Choose folder
-                </Button>
-              </div>
-              <form className="composer" onSubmit={submitMessage}>
-                <Textarea
-                  className="composer__input"
-                  aria-label="Message RBA"
-                  disabled={activeRequestId !== null}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
-                  placeholder="Message RBA"
-                  rows={3}
-                  value={draft}
-                />
-                {activeRequestId && (
+              <footer className="composer-area">
+                {error && <div className="error-message">{error}</div>}
+                <div className="working-directory">
+                  <span title={workingDirectory ?? undefined}>
+                    Working directory: {workingDirectory ?? 'Loading…'}
+                  </span>
                   <Button
                     type="button"
-                    variant="secondary"
-                    onClick={cancelResponse}
+                    variant="ghost"
+                    size="xs"
+                    disabled={activeRequestId !== null}
+                    onClick={chooseWorkingDirectory}
                   >
-                    Stop
+                    Choose folder
                   </Button>
-                )}
-              </form>
-              <p className="composer-hint">
-                Enter to send · Shift+Enter for a new line
-              </p>
-            </footer>
-          </section>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+                </div>
+                <form className="composer" onSubmit={submitMessage}>
+                  <Textarea
+                    className="composer__input"
+                    aria-label="Message RBA"
+                    disabled={activeRequestId !== null}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder="Message RBA"
+                    rows={3}
+                    value={draft}
+                  />
+                  {activeRequestId && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={cancelResponse}
+                    >
+                      Stop
+                    </Button>
+                  )}
+                </form>
+                <p className="composer-hint">
+                  Enter to send · Shift+Enter for a new line
+                </p>
+              </footer>
+            </section>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
     </main>
   );
 }

@@ -20,3 +20,15 @@ contextBridge.exposeInMainWorld('explorations', {
   commitTasks: (explorationId) =>
     ipcRenderer.invoke('explorations:commit-tasks', explorationId),
 });
+
+contextBridge.exposeInMainWorld('workers', {
+  get: (taskId) => ipcRenderer.invoke('workers:get', taskId),
+  start: (taskId) => ipcRenderer.invoke('workers:start', taskId),
+  stop: (taskId) => ipcRenderer.invoke('workers:stop', taskId),
+  onEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('workers:event', listener);
+
+    return () => ipcRenderer.removeListener('workers:event', listener);
+  },
+});
