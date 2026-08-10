@@ -65,9 +65,25 @@ test('streams text from Claude CLI JSON output', async () => {
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
     /Do not write or modify files/,
   );
+  assert.match(
+    invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
+    /do not ask permission before updating findings/,
+  );
+  assert.match(
+    invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
+    /Skip an update only when the turn produced no durable new understanding/,
+  );
   assert.equal(
     invocation.args[invocation.args.indexOf('--allowedTools') + 1],
-    'mcp__rba__read_findings,mcp__rba__update_findings',
+    [
+      'mcp__rba__read_findings',
+      'mcp__rba__update_findings',
+      'mcp__rba__read_tasks',
+      'mcp__rba__add_task',
+      'mcp__rba__update_task',
+      'mcp__rba__remove_task',
+      'mcp__rba__commit_tasks',
+    ].join(','),
   );
   const mcpConfig = JSON.parse(
     invocation.args[invocation.args.indexOf('--mcp-config') + 1],

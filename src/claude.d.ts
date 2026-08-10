@@ -36,6 +36,11 @@ export type ClaudeStreamEvent =
       markdown: string;
     }
   | {
+      type: 'tasks-updated';
+      requestId: string;
+      tasks: Task[];
+    }
+  | {
       type: 'complete';
       requestId: string;
       sessionId: string;
@@ -81,9 +86,22 @@ export type ExplorationSummary = {
   updatedAt: string;
 };
 
+export type TaskStatus = 'draft' | 'queued';
+
+export type Task = {
+  id: string;
+  sequence: number;
+  title: string;
+  specMarkdown: string;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Exploration = ExplorationSummary & {
   agentSession: AgentSession | null;
   findingsMarkdown: string | null;
+  tasks: Task[];
   messages: DisplayMessage[];
 };
 
@@ -100,6 +118,7 @@ declare global {
       list(): Promise<ExplorationSummary[]>;
       get(id: string): Promise<Exploration | null>;
       save(exploration: Exploration): Promise<void>;
+      commitTasks(explorationId: string): Promise<Task[]>;
     };
   }
 }

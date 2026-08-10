@@ -15,9 +15,11 @@ import type {
   DisplayPart,
   Exploration,
   ExplorationSummary,
+  Task,
   ToolStatus,
 } from './claude';
 import { MarkdownContent } from './components/MarkdownContent';
+import { TaskList } from './components/TaskList';
 import { Button } from './components/ui/button';
 import {
   ResizableHandle,
@@ -46,7 +48,17 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
         ? 'update findings'
         : tool.name === 'mcp__rba__read_findings'
           ? 'read findings'
-          : 'read file';
+          : tool.name === 'mcp__rba__read_tasks'
+            ? 'read tasks'
+            : tool.name === 'mcp__rba__add_task'
+              ? 'draft task'
+              : tool.name === 'mcp__rba__update_task'
+                ? 'update task'
+                : tool.name === 'mcp__rba__remove_task'
+                  ? 'remove task'
+                  : tool.name === 'mcp__rba__commit_tasks'
+                    ? 'queue tasks'
+                    : 'read file';
 
   if (tool.status === 'running') {
     return `${action[0].toUpperCase()}${action.slice(1)}…`;
@@ -66,6 +78,17 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
 
   if (tool.name === 'mcp__rba__update_findings') {
     return 'Updated findings';
+  }
+
+  const taskLabels: Record<string, string> = {
+    mcp__rba__read_tasks: 'Read tasks',
+    mcp__rba__add_task: 'Drafted task',
+    mcp__rba__update_task: 'Updated task',
+    mcp__rba__remove_task: 'Removed task',
+    mcp__rba__commit_tasks: 'Queued tasks',
+  };
+  if (taskLabels[tool.name]) {
+    return taskLabels[tool.name];
   }
 
   return tool.name === 'mcp__rba__read_findings'
@@ -245,6 +268,19 @@ export function App() {
             ? {
                 ...current,
                 findingsMarkdown: event.markdown,
+                updatedAt: new Date().toISOString(),
+              }
+            : current,
+        );
+        return;
+      }
+
+      if (event.type === 'tasks-updated') {
+        setActiveExploration((current) =>
+          current
+            ? {
+                ...current,
+                tasks: event.tasks,
                 updatedAt: new Date().toISOString(),
               }
             : current,
@@ -436,6 +472,7 @@ export function App() {
           workingDirectory,
           agentSession: null,
           findingsMarkdown: null,
+          tasks: [],
           messages: [userMessage, assistantMessage],
           createdAt: now,
           updatedAt: now,
@@ -545,6 +582,25 @@ export function App() {
     }
   }
 
+  async function commitTasks() {
+    if (!activeExploration || activeRequestId) {
+      return;
+    }
+
+    try {
+      const tasks: Task[] = await window.explorations.commitTasks(
+        activeExploration.id,
+      );
+      setActiveExploration((current) =>
+        current
+          ? { ...current, tasks, updatedAt: new Date().toISOString() }
+          : current,
+      );
+    } catch {
+      setError('Tasks could not be queued.');
+    }
+  }
+
   return (
     <main
       className={`app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}
@@ -633,30 +689,38 @@ export function App() {
             <header className="findings__header">
               <h2>Findings</h2>
             </header>
-            <div
-              className={`findings__content${activeExploration?.findingsMarkdown ? '' : ' findings__content--empty'}`}
-              aria-live="polite"
-            >
-              {activeExploration?.findingsMarkdown ? (
-                <MarkdownContent className="typeset-findings">
-                  {activeExploration.findingsMarkdown}
-                </MarkdownContent>
-              ) : (
-                <div className="findings-empty">
-                  <img
-                    className="findings-empty__graphic"
-                    src={findingsEmptyIcon}
-                    alt=""
-                    aria-hidden="true"
-                  />
-                  <div className="findings-empty__copy">
-                    <h3>Findings will take shape here</h3>
-                    <p>
-                      As you explore, key insights and decisions will be
-                      gathered into a clear, evolving summary.
-                    </p>
+            <div className="findings__content" aria-live="polite">
+              <div
+                className={`findings__document${activeExploration?.findingsMarkdown ? '' : ' findings__document--empty'}`}
+              >
+                {activeExploration?.findingsMarkdown ? (
+                  <MarkdownContent className="typeset-findings">
+                    {activeExploration.findingsMarkdown}
+                  </MarkdownContent>
+                ) : (
+                  <div className="findings-empty">
+                    <img
+                      className="findings-empty__graphic"
+                      src={findingsEmptyIcon}
+                      alt=""
+                      aria-hidden="true"
+                    />
+                    <div className="findings-empty__copy">
+                      <h3>Findings will take shape here</h3>
+                      <p>
+                        As you explore, key insights and decisions will be
+                        gathered into a clear, evolving summary.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
+              </div>
+              {activeExploration && (
+                <TaskList
+                  tasks={activeExploration.tasks}
+                  commitDisabled={activeRequestId !== null}
+                  onCommit={commitTasks}
+                />
               )}
             </div>
           </aside>

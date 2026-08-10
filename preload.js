@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld('explorations', {
   list: () => ipcRenderer.invoke('explorations:list'),
   get: (id) => ipcRenderer.invoke('explorations:get', id),
   save: (exploration) => ipcRenderer.invoke('explorations:save', exploration),
+  commitTasks: (explorationId) =>
+    ipcRenderer.invoke('explorations:commit-tasks', explorationId),
 });

@@ -13,6 +13,7 @@ function exploration(overrides = {}) {
     workingDirectory: '/workspace',
     agentSession: null,
     findingsMarkdown: null,
+    tasks: [],
     messages: [
       {
         id: 'message-1',
@@ -123,6 +124,67 @@ test('persists findings as part of an exploration', () => {
   store.close();
 });
 
+test('lists tasks with stable sequence order and commits drafts', () => {
+  const store = new ExplorationStore(':memory:');
+  store.save(exploration());
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, exploration_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      'task-2',
+      'exploration-1',
+      2,
+      'Second task',
+      '## Goal\n\nSecond.',
+      'queued',
+      '2026-08-09T10:02:00.000Z',
+      '2026-08-09T10:02:00.000Z',
+    );
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, exploration_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      'task-1',
+      'exploration-1',
+      1,
+      'First task',
+      '## Goal\n\nFirst.',
+      'draft',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+
+  assert.deepEqual(
+    store.get('exploration-1').tasks.map(({ id, sequence, status }) => ({
+      id,
+      sequence,
+      status,
+    })),
+    [
+      { id: 'task-1', sequence: 1, status: 'draft' },
+      { id: 'task-2', sequence: 2, status: 'queued' },
+    ],
+  );
+
+  const committed = store.commitTasks('exploration-1');
+  assert.deepEqual(
+    committed.map(({ id, status }) => ({ id, status })),
+    [
+      { id: 'task-1', status: 'queued' },
+      { id: 'task-2', status: 'queued' },
+    ],
+  );
+  store.close();
+});
+
 test('records each applied schema migration', () => {
   const store = new ExplorationStore(':memory:');
 
@@ -131,7 +193,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2],
+    [1, 2, 3],
   );
   store.close();
 });
@@ -176,7 +238,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2],
+    [1, 2, 3],
   );
   store.close();
 });

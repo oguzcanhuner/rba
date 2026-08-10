@@ -89,6 +89,25 @@ function isValidExploration(exploration) {
         (typeof exploration.findingsMarkdown === 'string' &&
           exploration.findingsMarkdown.length <= 500_000)) &&
       validSession &&
+      Array.isArray(exploration.tasks) &&
+      exploration.tasks.length <= 1_000 &&
+      exploration.tasks.every(
+        (task) =>
+          task &&
+          typeof task.id === 'string' &&
+          task.id.length > 0 &&
+          task.id.length <= 100 &&
+          Number.isSafeInteger(task.sequence) &&
+          task.sequence > 0 &&
+          typeof task.title === 'string' &&
+          task.title.length > 0 &&
+          task.title.length <= 200 &&
+          typeof task.specMarkdown === 'string' &&
+          task.specMarkdown.length <= 500_000 &&
+          ['draft', 'queued'].includes(task.status) &&
+          typeof task.createdAt === 'string' &&
+          typeof task.updatedAt === 'string',
+      ) &&
       Array.isArray(exploration.messages) &&
       exploration.messages.length <= 10_000 &&
       exploration.messages.every(
@@ -196,6 +215,12 @@ async function startClaudeRequest(event, request) {
 
     const toolNames = new Map();
     const pendingFindings = new Map();
+    const taskMutationTools = new Set([
+      'mcp__rba__add_task',
+      'mcp__rba__update_task',
+      'mcp__rba__remove_task',
+      'mcp__rba__commit_tasks',
+    ]);
     const stream = beginClaudeCli({
       prompt: request.prompt,
       sessionId: request.sessionId,
@@ -239,7 +264,13 @@ async function startClaudeRequest(event, request) {
             input:
               toolName === 'mcp__rba__update_findings'
                 ? {}
-                : relativeToolInput(tool.input, cwd),
+                : taskMutationTools.has(toolName)
+                  ? Object.fromEntries(
+                      Object.entries(tool.input ?? {}).filter(
+                        ([key]) => key !== 'specMarkdown',
+                      ),
+                    )
+                  : relativeToolInput(tool.input, cwd),
           },
         });
       },
@@ -255,6 +286,13 @@ async function startClaudeRequest(event, request) {
             type: 'findings-updated',
             requestId: request.requestId,
             markdown,
+          });
+        }
+        if (!tool.isError && taskMutationTools.has(toolNames.get(tool.id))) {
+          sendClaudeEvent(event.sender, {
+            type: 'tasks-updated',
+            requestId: request.requestId,
+            tasks: explorationStore.listTasks(request.explorationId),
           });
         }
         pendingFindings.delete(tool.id);
@@ -361,6 +399,19 @@ ipcMain.handle('explorations:save', (event, exploration) => {
   }
 
   explorationStore.save(exploration);
+});
+
+ipcMain.handle('explorations:commit-tasks', (event, explorationId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof explorationId !== 'string' ||
+    explorationId.length === 0 ||
+    explorationId.length > 100
+  ) {
+    throw new Error('Invalid task commit request.');
+  }
+
+  return explorationStore.commitTasks(explorationId);
 });
 
 function createWindow() {

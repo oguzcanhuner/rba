@@ -74,6 +74,30 @@ const migrations = [
       }
     },
   },
+  {
+    version: 3,
+    isApplied(database) {
+      return hasTable(database, 'tasks');
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,
+          exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+          sequence INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          spec_markdown TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (exploration_id, sequence)
+        );
+
+        CREATE INDEX IF NOT EXISTS tasks_by_exploration
+          ON tasks(exploration_id, sequence);
+      `);
+    },
+  },
 ];
 
 function migrate(database) {
@@ -235,7 +259,57 @@ class ExplorationStore {
         parts: JSON.parse(partsJson),
       }));
 
-    return { ...exploration, agentSession, messages };
+    return {
+      ...exploration,
+      agentSession,
+      tasks: this.listTasks(id),
+      messages,
+    };
+  }
+
+  listTasks(explorationId) {
+    return this.database
+      .prepare(`
+        SELECT
+          id,
+          sequence,
+          title,
+          spec_markdown AS specMarkdown,
+          status,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM tasks
+        WHERE exploration_id = ?
+        ORDER BY sequence
+      `)
+      .all(explorationId)
+      .map((row) => ({ ...row }));
+  }
+
+  commitTasks(explorationId) {
+    const now = new Date().toISOString();
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      const result = this.database
+        .prepare(`
+          UPDATE tasks
+          SET status = 'queued', updated_at = ?
+          WHERE exploration_id = ? AND status = 'draft'
+        `)
+        .run(now, explorationId);
+
+      if (result.changes > 0) {
+        this.database
+          .prepare('UPDATE explorations SET updated_at = ? WHERE id = ?')
+          .run(now, explorationId);
+      }
+      this.database.exec('COMMIT');
+      return this.listTasks(explorationId);
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   save(exploration) {

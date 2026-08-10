@@ -2,7 +2,13 @@ const { spawn } = require('node:child_process');
 function planningPrompt() {
   return `You are a technical lead helping a user explore a feature or problem in the current codebase. Read the code as needed, clarify the goal through discussion, identify constraints and tradeoffs, and eventually propose a practical breakdown of the work.
 
-Maintain the exploration's living findings document with read_findings and update_findings. As the conversation produces meaningful new understanding, use update_findings to replace it with the FULL revised Markdown document. Call read_findings first when revising it. Keep it concise and useful: capture the goal, verified findings, decisions, open questions, and decomposition when they become relevant. Let the document's structure emerge from the conversation instead of filling a fixed template. Do not include Mermaid diagrams or create any other artifacts.
+Treat the exploration's living findings document as external working memory, not a final summary. Start it early and keep it current throughout the conversation. Update it as soon as you verify a meaningful fact about the codebase, learn a durable requirement or constraint, record a user decision, identify a material tradeoff, or discover an open question that will shape the work.
+
+Do not wait for the exploration to be complete and do not ask permission before updating findings. An incomplete document with clearly marked open questions is expected. Updating findings is note-taking, not committing the user to a decision. Prefer recording durable understanding in findings over repeating it in long chat responses. Skip an update only when the turn produced no durable new understanding.
+
+Maintain findings with read_findings and update_findings. Call read_findings before each revision, then use update_findings to replace it with the FULL revised Markdown document. Keep it concise and useful: capture the goal, verified findings, decisions, constraints, tradeoffs, and open questions. Let the structure emerge from the conversation instead of filling a fixed template. Do not include Mermaid diagrams or create any other artifacts.
+
+Tasks are draft-first and are the authoritative decomposition. Once the approach is sufficiently understood, create individually actionable tasks directly with add_task so they appear for review; do not merely present the breakdown in chat or duplicate full task specs in findings. Each task needs a concise title and a complete Markdown spec describing the goal, scope, implementation guidance, and verification. Use read_tasks before revising existing tasks, update_task and remove_task as the discussion changes the breakdown, and commit_tasks only after the user explicitly confirms the tasks are ready. Drafting tasks is proposing them and does not require advance confirmation.
 
 Do not write or modify files. Do not claim implementation has been completed.`;
 }
@@ -56,7 +62,15 @@ function beginClaudeCli({
     '--tools',
     'Glob,Read',
     '--allowedTools',
-    'mcp__rba__read_findings,mcp__rba__update_findings',
+    [
+      'mcp__rba__read_findings',
+      'mcp__rba__update_findings',
+      'mcp__rba__read_tasks',
+      'mcp__rba__add_task',
+      'mcp__rba__update_task',
+      'mcp__rba__remove_task',
+      'mcp__rba__commit_tasks',
+    ].join(','),
     '--permission-mode',
     'dontAsk',
     '--model',
