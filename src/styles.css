@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@catppuccin/highlightjs/css/catppuccin-latte.css";
+@import "@catppuccin/highlightjs/css/catppuccin-mocha.css";
 @import "./typeset.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -270,8 +270,12 @@
   --typeset-size: 1rem;
   --typeset-leading: 1.625;
   --typeset-flow: 1em;
-  max-width: 72ch;
   font-size: var(--typeset-size);
+}
+
+.typeset :where(pre) {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
 }
 
 .findings-empty {
@@ -309,7 +313,6 @@
 }
 
 .tasks {
-  max-width: 72ch;
   margin-top: 32px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
@@ -640,16 +643,11 @@
   grid-template-columns: 1fr auto;
   align-items: end;
   gap: 8px;
+  margin-inline: -12px;
   padding: 8px;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-xl);
+  border: 0;
   background: var(--card);
-  box-shadow: 0 8px 24px rgb(76 79 105 / 8%);
-}
-
-.composer:focus-within {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent);
+  box-shadow: none;
 }
 
 .composer .composer__input {

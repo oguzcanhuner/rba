@@ -196,7 +196,9 @@ export function App() {
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const endOfMessages = useRef<HTMLDivElement>(null);
+  const messagesContainer = useRef<HTMLElement>(null);
+  const shouldFollowMessages = useRef(true);
+  const previousExplorationId = useRef<string | null>(null);
   const messages = activeExploration?.messages ?? [];
 
   useEffect(() => {
@@ -429,10 +431,17 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      endOfMessages.current?.scrollIntoView({ behavior: 'smooth' });
+    const explorationId = activeExploration?.id ?? null;
+    if (explorationId !== previousExplorationId.current) {
+      previousExplorationId.current = explorationId;
+      shouldFollowMessages.current = true;
     }
-  }, [messages]);
+
+    const container = messagesContainer.current;
+    if (messages.length > 0 && container && shouldFollowMessages.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [activeExploration?.id, messages]);
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -733,7 +742,19 @@ export function App() {
               <span>Sonnet</span>
             </header>
 
-            <section className="messages" aria-live="polite">
+            <section
+              className="messages"
+              aria-live="polite"
+              ref={messagesContainer}
+              onScroll={(event) => {
+                const container = event.currentTarget;
+                const distanceFromEnd =
+                  container.scrollHeight -
+                  container.scrollTop -
+                  container.clientHeight;
+                shouldFollowMessages.current = distanceFromEnd <= 24;
+              }}
+            >
               {messages.length === 0 ? (
                 <div className="empty-state">
                   <h2>What would you like to explore?</h2>
@@ -805,7 +826,6 @@ export function App() {
                   );
                 })
               )}
-              <div ref={endOfMessages} />
             </section>
 
             <footer className="composer-area">
