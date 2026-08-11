@@ -205,11 +205,17 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [queuedMessages, setQueuedMessages] = useState<
+    { id: string; text: string }[]
+  >([]);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
   const [workerDiff, setWorkerDiff] = useState('');
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesContainer = useRef<HTMLElement>(null);
+  const startExplorationRequestRef = useRef<
+    (content: string, cwd: string) => void
+  >(() => {});
   const shouldFollowMessages = useRef(true);
   const previousExplorationId = useRef<string | null>(null);
   const messages = activeExploration?.messages ?? [];
@@ -433,6 +439,9 @@ export function App() {
             : current,
         );
         setError(event.message);
+        // A failed turn shouldn't silently fire every queued follow-up against
+        // a broken session; surface the error and let the user decide.
+        setQueuedMessages([]);
       }
 
       setActiveRequestId((current) =>
@@ -469,6 +478,16 @@ export function App() {
       }),
     [],
   );
+
+  useEffect(() => {
+    if (activeRequestId || queuedMessages.length === 0 || !workingDirectory) {
+      return;
+    }
+
+    const [next, ...rest] = queuedMessages;
+    setQueuedMessages(rest);
+    startExplorationRequestRef.current(next.text, workingDirectory);
+  }, [activeRequestId, queuedMessages, workingDirectory]);
 
   useEffect(() => {
     if (!activeWorker) {
@@ -509,14 +528,7 @@ export function App() {
     }
   }, [activeExploration?.id, messages]);
 
-  async function submitMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const content = draft.trim();
-    if (!content || activeRequestId || !workingDirectory) {
-      return;
-    }
-
+  async function startExplorationRequest(content: string, cwd: string) {
     const requestId = crypto.randomUUID();
     const now = new Date().toISOString();
     const userMessage: DisplayMessage = {
@@ -544,7 +556,7 @@ export function App() {
       : {
           id: crypto.randomUUID(),
           title: explorationTitle(content),
-          workingDirectory,
+          workingDirectory: cwd,
           agentSession: null,
           findingsMarkdown: null,
           tasks: [],
@@ -554,8 +566,6 @@ export function App() {
         };
 
     setActiveExploration(exploration);
-    setDraft('');
-    setError(null);
     setActiveRequestId(requestId);
     try {
       await window.explorations.save(exploration);
@@ -563,7 +573,7 @@ export function App() {
         requestId,
         explorationId: exploration.id,
         prompt: content,
-        cwd: workingDirectory,
+        cwd,
         ...(exploration.agentSession?.provider === 'claude'
           ? { sessionId: exploration.agentSession.externalId }
           : {}),
@@ -581,6 +591,34 @@ export function App() {
       setError('This exploration could not be saved.');
     }
   }
+
+  function submitMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const content = draft.trim();
+    if (!content || !workingDirectory) {
+      return;
+    }
+
+    setDraft('');
+    setError(null);
+
+    if (activeRequestId) {
+      // A turn is already in flight, so hold this message and send it once the
+      // agent finishes its current turn.
+      setQueuedMessages((queue) => [
+        ...queue,
+        { id: crypto.randomUUID(), text: content },
+      ]);
+      return;
+    }
+
+    void startExplorationRequest(content, workingDirectory);
+  }
+
+  startExplorationRequestRef.current = (content, cwd) => {
+    void startExplorationRequest(content, cwd);
+  };
 
   async function persistCurrentExploration() {
     if (activeExploration) {
@@ -1006,29 +1044,60 @@ export function App() {
                     Choose folder
                   </Button>
                 </div>
+                {queuedMessages.length > 0 && (
+                  <ul className="composer-queue" aria-label="Queued messages">
+                    {queuedMessages.map((message) => (
+                      <li className="composer-queue__item" key={message.id}>
+                        <span className="composer-queue__label">Queued</span>
+                        <span className="composer-queue__text">
+                          {message.text}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          aria-label="Remove queued message"
+                          onClick={() =>
+                            setQueuedMessages((queue) =>
+                              queue.filter((item) => item.id !== message.id),
+                            )
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <form className="composer" onSubmit={submitMessage}>
                   <Textarea
                     className="composer__input"
                     aria-label="Message RBA"
-                    disabled={activeRequestId !== null}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={handleComposerKeyDown}
-                    placeholder="Message RBA"
+                    placeholder={activeRequestId ? 'Steer RBA…' : 'Message RBA'}
                     rows={3}
                     value={draft}
                   />
-                  {activeRequestId && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={cancelResponse}
-                    >
-                      Stop
+                  <div className="composer__actions">
+                    <Button type="submit" disabled={!draft.trim()}>
+                      {activeRequestId ? 'Queue' : 'Send'}
                     </Button>
-                  )}
+                    {activeRequestId && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={cancelResponse}
+                      >
+                        Stop
+                      </Button>
+                    )}
+                  </div>
                 </form>
                 <p className="composer-hint">
-                  Enter to send · Shift+Enter for a new line
+                  {activeRequestId
+                    ? 'Enter to queue · sends when the current turn finishes'
+                    : 'Enter to send · Shift+Enter for a new line'}
                 </p>
               </footer>
             </section>
