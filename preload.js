@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('workers', {
   get: (taskId) => ipcRenderer.invoke('workers:get', taskId),
   start: (taskId) => ipcRenderer.invoke('workers:start', taskId),
   stop: (taskId) => ipcRenderer.invoke('workers:stop', taskId),
+  send: (taskId, prompt) => ipcRenderer.invoke('workers:send', taskId, prompt),
+  diff: (taskId) => ipcRenderer.invoke('workers:diff', taskId),
   onEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('workers:event', listener);

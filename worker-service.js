@@ -1,4 +1,5 @@
 const { execFile } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const { mkdir } = require('node:fs/promises');
 const path = require('node:path');
 const { promisify } = require('node:util');
@@ -111,7 +112,12 @@ class WorkerService {
       status: 'streaming',
       parts: [],
     };
-    this.store.createWorkerRun(taskId, { branch, worktree, startedAt });
+    this.store.createWorkerRun(taskId, {
+      branch,
+      worktree,
+      baseRevision,
+      startedAt,
+    });
     this.store.saveWorkerMessage(taskId, message);
     this.broadcast(taskId);
 
@@ -120,17 +126,67 @@ class WorkerService {
       message,
       stream: null,
       finalized: false,
+      messagePosition: 0,
     };
     this.running.set(taskId, runtime);
+    this.launch(runtime, workerTaskPrompt(task), worktree);
 
+    return this.store.getWorkerRun(taskId);
+  }
+
+  send(taskId, prompt) {
+    if (this.running.has(taskId)) {
+      throw new Error('Wait for the worker to finish responding.');
+    }
+    const run = this.store.getWorkerRun(taskId);
+    if (!run) {
+      throw new Error('The worker no longer exists.');
+    }
+    if (!run.sessionId) {
+      throw new Error('This worker cannot receive another message yet.');
+    }
+
+    const turnId = randomUUID();
+    const userMessage = {
+      id: `worker-user-${turnId}`,
+      role: 'user',
+      status: 'complete',
+      parts: [{ type: 'text', id: `${turnId}-text-0`, text: prompt }],
+    };
+    const assistantMessage = {
+      id: `worker-assistant-${turnId}`,
+      role: 'assistant',
+      status: 'streaming',
+      parts: [],
+    };
+    const { assistantPosition } = this.store.beginWorkerTurn(
+      taskId,
+      userMessage,
+      assistantMessage,
+    );
+    const runtime = {
+      taskId,
+      message: assistantMessage,
+      stream: null,
+      finalized: false,
+      messagePosition: assistantPosition,
+    };
+    this.running.set(taskId, runtime);
+    this.broadcast(taskId);
+    this.launch(runtime, prompt, run.worktree, run.sessionId);
+    return this.store.getWorkerRun(taskId);
+  }
+
+  launch(runtime, prompt, worktree, sessionId) {
     try {
       runtime.stream = this.beginWorker({
-        prompt: workerTaskPrompt(task),
+        prompt,
+        sessionId,
         cwd: worktree,
         onText: (text) => {
           runtime.message = {
             ...runtime.message,
-            parts: appendText(runtime.message.parts, text, taskId),
+            parts: appendText(runtime.message.parts, text, runtime.taskId),
           };
           this.persist(runtime);
         },
@@ -200,8 +256,69 @@ class WorkerService {
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
 
-    return this.store.getWorkerRun(taskId);
+  async getDiff(taskId) {
+    const run = this.store.getWorkerRun(taskId);
+    if (!run) {
+      throw new Error('The worker no longer exists.');
+    }
+    if (!run.baseRevision) {
+      return { patch: '' };
+    }
+
+    const options = { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 };
+    const { stdout } = await this.runCommand(
+      'git',
+      [
+        '-C',
+        run.worktree,
+        '-c',
+        'core.quotePath=false',
+        'diff',
+        '--no-ext-diff',
+        '--find-renames',
+        '--unified=3',
+        '--no-color',
+        run.baseRevision,
+        '--',
+      ],
+      options,
+    );
+    const { stdout: untrackedOutput } = await this.runCommand(
+      'git',
+      ['-C', run.worktree, 'ls-files', '--others', '--exclude-standard', '-z'],
+      options,
+    );
+    const patches = [stdout];
+    for (const file of untrackedOutput.split('\0').filter(Boolean)) {
+      try {
+        const result = await this.runCommand(
+          'git',
+          [
+            '-C',
+            run.worktree,
+            '-c',
+            'core.quotePath=false',
+            'diff',
+            '--no-index',
+            '--unified=3',
+            '--no-color',
+            '--',
+            '/dev/null',
+            file,
+          ],
+          options,
+        );
+        patches.push(result.stdout);
+      } catch (error) {
+        if (error?.code !== 1 || typeof error.stdout !== 'string') {
+          throw error;
+        }
+        patches.push(error.stdout);
+      }
+    }
+    return { patch: patches.filter(Boolean).join('\n') };
   }
 
   stop(taskId) {
@@ -225,7 +342,11 @@ class WorkerService {
     if (runtime.finalized || this.disposed) {
       return;
     }
-    this.store.saveWorkerMessage(runtime.taskId, runtime.message);
+    this.store.saveWorkerMessage(
+      runtime.taskId,
+      runtime.message,
+      runtime.messagePosition,
+    );
     this.broadcast(runtime.taskId);
   }
 
@@ -251,7 +372,11 @@ class WorkerService {
             : 'error',
       ),
     };
-    this.store.saveWorkerMessage(runtime.taskId, runtime.message);
+    this.store.saveWorkerMessage(
+      runtime.taskId,
+      runtime.message,
+      runtime.messagePosition,
+    );
     const run = this.store.updateWorkerRun(runtime.taskId, {
       status,
       sessionId,

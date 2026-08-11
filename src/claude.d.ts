@@ -118,12 +118,15 @@ export type WorkerRun = {
   status: Exclude<TaskStatus, 'draft' | 'queued'>;
   branch: string;
   worktree: string;
+  baseRevision: string | null;
   sessionId: string | null;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
   messages: DisplayMessage[];
 };
+
+export type WorkerDiff = { patch: string };
 
 export type WorkerEvent = { type: 'worker-updated'; run: WorkerRun };
 
@@ -146,6 +149,8 @@ declare global {
       get(taskId: string): Promise<WorkerRun | null>;
       start(taskId: string): Promise<WorkerRun>;
       stop(taskId: string): Promise<WorkerRun>;
+      send(taskId: string, prompt: string): Promise<WorkerRun>;
+      diff(taskId: string): Promise<WorkerDiff>;
       onEvent(callback: (event: WorkerEvent) => void): () => void;
     };
   }

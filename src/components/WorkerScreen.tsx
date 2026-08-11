@@ -1,11 +1,29 @@
-import { useEffect, useRef } from 'react';
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useDefaultLayout } from 'react-resizable-panels';
 import type { DisplayPart, WorkerRun } from '../claude';
 import { MarkdownContent } from './MarkdownContent';
 import { Button } from './ui/button';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from './ui/resizable';
+import { Textarea } from './ui/textarea';
+import { parseWorkerDiff, WorkerDiff, WorkerFileTree } from './WorkerDiff';
 
 type WorkerScreenProps = {
   run: WorkerRun;
+  diff: string;
+  error: string | null;
   onBack: () => void;
+  onSend: (message: string) => Promise<boolean>;
   onStop: () => void;
 };
 
@@ -56,8 +74,35 @@ function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
   return typeof value === 'string' ? value : null;
 }
 
-export function WorkerScreen({ run, onBack, onStop }: WorkerScreenProps) {
+export function WorkerScreen({
+  run,
+  diff,
+  error,
+  onBack,
+  onSend,
+  onStop,
+}: WorkerScreenProps) {
+  const workerLayout = useDefaultLayout({
+    id: 'rba.worker-workspace-v4',
+    panelIds: ['review', 'worker-chat'],
+    storage: window.localStorage,
+  });
   const messages = useRef<HTMLElement>(null);
+  const [draft, setDraft] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const changedFiles = useMemo(() => parseWorkerDiff(diff), [diff]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (changedFiles.length === 0) {
+      setSelectedFile(null);
+    } else if (
+      !selectedFile ||
+      !changedFiles.some((file) => file.path === selectedFile)
+    ) {
+      setSelectedFile(changedFiles[0].path);
+    }
+  }, [changedFiles, selectedFile]);
 
   useEffect(() => {
     const container = messages.current;
@@ -65,6 +110,39 @@ export function WorkerScreen({ run, onBack, onStop }: WorkerScreenProps) {
       container.scrollTop = container.scrollHeight;
     }
   });
+
+  async function submitMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const message = draft.trim();
+    if (!message || isSending || run.status === 'working' || !run.sessionId) {
+      return;
+    }
+    setIsSending(true);
+    const sent = await onSend(message);
+    if (sent) {
+      setDraft('');
+    }
+    setIsSending(false);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+
+  function selectFile(path: string) {
+    setSelectedFile(path);
+    const index = changedFiles.findIndex((file) => file.path === path);
+    document
+      .getElementById(`worker-diff-${index}`)
+      ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
 
   return (
     <section className="worker-screen">
@@ -74,71 +152,142 @@ export function WorkerScreen({ run, onBack, onStop }: WorkerScreenProps) {
         </Button>
         <h1>{run.title}</h1>
         <span className={`worker-status worker-status--${run.status}`}>
-          {run.status}
+          ● {run.status}
         </span>
       </header>
 
-      <section
-        className="messages worker-screen__messages"
-        aria-live="polite"
-        ref={messages}
+      <ResizablePanelGroup
+        className="workspace worker-workspace"
+        defaultLayout={workerLayout.defaultLayout}
+        id="rba.worker-workspace-v4"
+        onLayoutChanged={workerLayout.onLayoutChanged}
+        orientation="horizontal"
       >
-        {run.messages.map((message) => (
-          <article className="message message--assistant" key={message.id}>
-            <div className="message__role">Worker</div>
-            {message.parts.length === 0 && message.status === 'streaming' ? (
-              <div className="message__content">
-                <span className="thinking">Thinking…</span>
-              </div>
-            ) : (
-              message.parts.map((part) => {
-                if (part.type === 'text') {
-                  return (
-                    <MarkdownContent
-                      className="message__part message__content"
-                      key={part.id}
-                    >
-                      {part.text}
-                    </MarkdownContent>
-                  );
-                }
-
-                const detail = toolDetail(part.tool);
-                return (
-                  <div
-                    className={`message__part tool-use tool-use--${part.tool.status}`}
-                    key={part.tool.id}
-                  >
-                    <span className="tool-use__indicator" />
-                    <span className="tool-use__label">
-                      {toolLabel(part.tool)}
-                    </span>
-                    {detail && (
-                      <code className="tool-use__detail">{detail}</code>
-                    )}
+        <ResizablePanel defaultSize={70} id="review" minSize={40}>
+          <section className="worker-review" aria-label="Worker changes">
+            <WorkerFileTree
+              files={changedFiles}
+              selected={selectedFile}
+              onPick={selectFile}
+            />
+            <WorkerDiff files={changedFiles} selected={selectedFile} />
+          </section>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={30} id="worker-chat" minSize={28}>
+          <section className="worker-chat">
+            <header className="worker-chat__header">
+              <h2>Conversation</h2>
+              <span>Sonnet</span>
+            </header>
+            <section
+              className="messages worker-screen__messages"
+              aria-live="polite"
+              ref={messages}
+            >
+              {run.messages.map((message) => (
+                <article
+                  className={`message message--${message.role}`}
+                  key={message.id}
+                >
+                  <div className="message__role">
+                    {message.role === 'user' ? 'You' : 'Worker'}
                   </div>
-                );
-              })
-            )}
-            {message.status === 'cancelled' && (
-              <div className="message__status">Stopped</div>
-            )}
-            {message.status === 'error' && (
-              <div className="message__status">Interrupted</div>
-            )}
-          </article>
-        ))}
-        {run.error && <div className="error-message">{run.error}</div>}
-      </section>
+                  {message.parts.length === 0 &&
+                  message.status === 'streaming' ? (
+                    <div className="message__content">
+                      <span className="thinking">Thinking…</span>
+                    </div>
+                  ) : (
+                    message.parts.map((part) => {
+                      if (part.type === 'text') {
+                        return message.role === 'assistant' ? (
+                          <MarkdownContent
+                            className="message__part message__content"
+                            key={part.id}
+                          >
+                            {part.text}
+                          </MarkdownContent>
+                        ) : (
+                          <div
+                            className="message__part message__content"
+                            key={part.id}
+                          >
+                            {part.text}
+                          </div>
+                        );
+                      }
 
-      <footer className="worker-screen__footer">
-        <span title={run.worktree}>{run.worktree}</span>
-        {run.status === 'working' && (
-          <Button type="button" variant="secondary" onClick={onStop}>
-            Stop
-          </Button>
-        )}
-      </footer>
+                      const detail = toolDetail(part.tool);
+                      return (
+                        <div
+                          className={`message__part tool-use tool-use--${part.tool.status}`}
+                          key={part.tool.id}
+                        >
+                          <span className="tool-use__indicator" />
+                          <span className="tool-use__label">
+                            {toolLabel(part.tool)}
+                          </span>
+                          {detail && (
+                            <code className="tool-use__detail">{detail}</code>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                  {message.status === 'cancelled' && (
+                    <div className="message__status">Stopped</div>
+                  )}
+                  {message.status === 'error' && (
+                    <div className="message__status">Interrupted</div>
+                  )}
+                </article>
+              ))}
+              {run.error && <div className="error-message">{run.error}</div>}
+            </section>
+
+            <footer className="composer-area worker-composer-area">
+              {error && <div className="error-message">{error}</div>}
+              <div className="working-directory">
+                <span title={run.worktree}>Worktree: {run.worktree}</span>
+              </div>
+              <form className="composer" onSubmit={submitMessage}>
+                <Textarea
+                  className="composer__input"
+                  aria-label="Message worker"
+                  disabled={
+                    run.status === 'working' || isSending || !run.sessionId
+                  }
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    run.sessionId
+                      ? 'Ask for a change or clarification'
+                      : 'Available after the worker finishes'
+                  }
+                  rows={3}
+                  value={draft}
+                />
+                {run.status === 'working' ? (
+                  <Button type="button" variant="secondary" onClick={onStop}>
+                    Stop
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={!draft.trim() || isSending || !run.sessionId}
+                  >
+                    Send
+                  </Button>
+                )}
+              </form>
+              <p className="composer-hint">
+                Enter to send · Shift+Enter for a new line
+              </p>
+            </footer>
+          </section>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </section>
   );
 }

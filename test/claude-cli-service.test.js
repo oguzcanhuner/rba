@@ -59,7 +59,7 @@ test('streams text from Claude CLI JSON output', async () => {
   assert.equal(invocation.command, 'claude');
   assert.equal(
     invocation.args[invocation.args.indexOf('--tools') + 1],
-    'Glob,Read',
+    'Glob,Grep,Read',
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],

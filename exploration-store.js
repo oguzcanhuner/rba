@@ -112,6 +112,7 @@ const migrations = [
           status TEXT NOT NULL,
           branch TEXT NOT NULL,
           worktree TEXT NOT NULL,
+          base_revision TEXT,
           session_id TEXT,
           error TEXT,
           started_at TEXT NOT NULL,
@@ -130,6 +131,17 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS worker_messages_by_task
           ON worker_messages(task_id, position);
       `);
+    },
+  },
+  {
+    version: 5,
+    isApplied(database) {
+      return hasColumn(database, 'worker_runs', 'base_revision');
+    },
+    up(database) {
+      if (!hasColumn(database, 'worker_runs', 'base_revision')) {
+        database.exec('ALTER TABLE worker_runs ADD COLUMN base_revision TEXT');
+      }
     },
   },
 ];
@@ -365,7 +377,10 @@ class ExplorationStore {
     return row ? { ...row } : null;
   }
 
-  createWorkerRun(taskId, { branch, worktree, startedAt }) {
+  createWorkerRun(
+    taskId,
+    { branch, worktree, baseRevision = null, startedAt },
+  ) {
     this.database.exec('BEGIN IMMEDIATE');
     try {
       const task = this.database
@@ -381,10 +396,10 @@ class ExplorationStore {
       this.database
         .prepare(`
           INSERT INTO worker_runs (
-            task_id, status, branch, worktree, started_at
-          ) VALUES (?, 'working', ?, ?, ?)
+            task_id, status, branch, worktree, base_revision, started_at
+          ) VALUES (?, 'working', ?, ?, ?, ?)
         `)
-        .run(taskId, branch, worktree, startedAt);
+        .run(taskId, branch, worktree, baseRevision, startedAt);
       this.database
         .prepare(
           `UPDATE tasks SET status = 'working', updated_at = ? WHERE id = ?`,
@@ -418,6 +433,69 @@ class ExplorationStore {
         message.status,
         JSON.stringify(message.parts),
       );
+  }
+
+  beginWorkerTurn(taskId, userMessage, assistantMessage) {
+    const now = new Date().toISOString();
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const run = this.database
+        .prepare(
+          'SELECT session_id AS sessionId FROM worker_runs WHERE task_id = ?',
+        )
+        .get(taskId);
+      if (!run?.sessionId) {
+        throw new Error('This worker cannot receive another message yet.');
+      }
+
+      const { position } = this.database
+        .prepare(
+          `SELECT COALESCE(MAX(position), -1) + 1 AS position
+           FROM worker_messages WHERE task_id = ?`,
+        )
+        .get(taskId);
+      const insertMessage = this.database.prepare(`
+        INSERT INTO worker_messages (
+          id, task_id, position, role, status, parts_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      insertMessage.run(
+        userMessage.id,
+        taskId,
+        position,
+        userMessage.role,
+        userMessage.status,
+        JSON.stringify(userMessage.parts),
+      );
+      insertMessage.run(
+        assistantMessage.id,
+        taskId,
+        position + 1,
+        assistantMessage.role,
+        assistantMessage.status,
+        JSON.stringify(assistantMessage.parts),
+      );
+      this.database
+        .prepare(`
+          UPDATE worker_runs
+          SET status = 'working', error = NULL, finished_at = NULL
+          WHERE task_id = ?
+        `)
+        .run(taskId);
+      this.database
+        .prepare(
+          `UPDATE tasks SET status = 'working', updated_at = ? WHERE id = ?`,
+        )
+        .run(now, taskId);
+      this.database.exec('COMMIT');
+      return {
+        run: this.getWorkerRun(taskId),
+        assistantPosition: position + 1,
+      };
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   updateWorkerRun(taskId, { status, sessionId = null, error = null }) {
@@ -457,6 +535,7 @@ class ExplorationStore {
           w.status,
           w.branch,
           w.worktree,
+          w.base_revision AS baseRevision,
           w.session_id AS sessionId,
           w.error,
           w.started_at AS startedAt,

@@ -127,3 +127,98 @@ test('stops a running worker', async () => {
   assert.equal(stopped.messages[0].status, 'cancelled');
   store.close();
 });
+
+test('resumes a completed worker with a persisted user message', async () => {
+  const store = storeWithQueuedTask();
+  const turns = [];
+  const completions = [];
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (_command, args) => ({
+      stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+    }),
+    beginWorker: (options) => {
+      turns.push(options);
+      let finish;
+      const completion = new Promise((resolve) => {
+        finish = resolve;
+      });
+      completions.push(finish);
+      return { cancel: () => {}, completion };
+    },
+  });
+
+  await service.start('task-1');
+  completions[0]({ sessionId: 'session-1' });
+  await waitForImmediate();
+
+  const responding = service.send('task-1', 'Please rename the helper.');
+  assert.equal(responding.status, 'working');
+  assert.equal(turns[1].prompt, 'Please rename the helper.');
+  assert.equal(turns[1].sessionId, 'session-1');
+  assert.deepEqual(
+    responding.messages.map((message) => message.role),
+    ['assistant', 'user', 'assistant'],
+  );
+  turns[1].onText('Done.');
+  completions[1]({ sessionId: 'session-1' });
+  await waitForImmediate();
+
+  const completed = store.getWorkerRun('task-1');
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.messages[2].parts[0].text, 'Done.');
+  store.close();
+});
+
+test('returns tracked and untracked worker changes from the base revision', async () => {
+  const store = storeWithQueuedTask();
+  let finish;
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (_command, args) => {
+      if (args.includes('--show-toplevel')) {
+        return { stdout: '/repo\n' };
+      }
+      if (args.at(-1) === 'HEAD') {
+        return { stdout: 'abc123\n' };
+      }
+      if (args.includes('ls-files')) {
+        return { stdout: 'new.js\0' };
+      }
+      if (args.includes('--no-index')) {
+        throw Object.assign(new Error('Changes found'), {
+          code: 1,
+          stdout:
+            'diff --git a/new.js b/new.js\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+new\n',
+        });
+      }
+      if (args.includes('diff')) {
+        assert.equal(args.includes('abc123'), true);
+        return {
+          stdout:
+            'diff --git a/main.js b/main.js\n--- a/main.js\n+++ b/main.js\n@@ -1 +1 @@\n-old\n+new\n',
+        };
+      }
+      return { stdout: '' };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise((resolve) => {
+        finish = resolve;
+      }),
+    }),
+  });
+
+  await service.start('task-1');
+  const diff = await service.getDiff('task-1');
+
+  assert.match(diff.patch, /main\.js/);
+  assert.match(diff.patch, /new\.js/);
+  finish({ sessionId: 'session-1' });
+  await waitForImmediate();
+  store.close();
+});

@@ -46,21 +46,23 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
   const action =
     tool.name === 'Glob'
       ? 'list files'
-      : tool.name === 'mcp__rba__update_findings'
-        ? 'update findings'
-        : tool.name === 'mcp__rba__read_findings'
-          ? 'read findings'
-          : tool.name === 'mcp__rba__read_tasks'
-            ? 'read tasks'
-            : tool.name === 'mcp__rba__add_task'
-              ? 'draft task'
-              : tool.name === 'mcp__rba__update_task'
-                ? 'update task'
-                : tool.name === 'mcp__rba__remove_task'
-                  ? 'remove task'
-                  : tool.name === 'mcp__rba__commit_tasks'
-                    ? 'queue tasks'
-                    : 'read file';
+      : tool.name === 'Grep'
+        ? 'search files'
+        : tool.name === 'mcp__rba__update_findings'
+          ? 'update findings'
+          : tool.name === 'mcp__rba__read_findings'
+            ? 'read findings'
+            : tool.name === 'mcp__rba__read_tasks'
+              ? 'read tasks'
+              : tool.name === 'mcp__rba__add_task'
+                ? 'draft task'
+                : tool.name === 'mcp__rba__update_task'
+                  ? 'update task'
+                  : tool.name === 'mcp__rba__remove_task'
+                    ? 'remove task'
+                    : tool.name === 'mcp__rba__commit_tasks'
+                      ? 'queue tasks'
+                      : 'read file';
 
   if (tool.status === 'running') {
     return `${action[0].toUpperCase()}${action.slice(1)}…`;
@@ -76,6 +78,10 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
 
   if (tool.name === 'Glob') {
     return 'Listed files';
+  }
+
+  if (tool.name === 'Grep') {
+    return 'Searched files';
   }
 
   if (tool.name === 'mcp__rba__update_findings') {
@@ -104,7 +110,9 @@ function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
   }
 
   const value =
-    tool.name === 'Glob' ? tool.input.pattern : tool.input.file_path;
+    tool.name === 'Glob' || tool.name === 'Grep'
+      ? tool.input.pattern
+      : tool.input.file_path;
   return typeof value === 'string' ? value : null;
 }
 
@@ -198,6 +206,7 @@ export function App() {
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
+  const [workerDiff, setWorkerDiff] = useState('');
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesContainer = useRef<HTMLElement>(null);
@@ -462,6 +471,32 @@ export function App() {
   );
 
   useEffect(() => {
+    if (!activeWorker) {
+      setWorkerDiff('');
+      return;
+    }
+
+    let disposed = false;
+    const timeout = window.setTimeout(() => {
+      window.workers
+        .diff(activeWorker.taskId)
+        .then((diff) => {
+          if (!disposed) {
+            setWorkerDiff(diff.patch);
+          }
+        })
+        .catch(() => {
+          // A worker update can arrive while its worktree is still being created.
+        });
+    }, 150);
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timeout);
+    };
+  }, [activeWorker]);
+
+  useEffect(() => {
     const explorationId = activeExploration?.id ?? null;
     if (explorationId !== previousExplorationId.current) {
       previousExplorationId.current = explorationId;
@@ -697,86 +732,113 @@ export function App() {
     }
   }
 
+  async function sendWorkerMessage(message: string) {
+    if (!activeWorker || activeWorker.status === 'working') {
+      return false;
+    }
+    setError(null);
+    try {
+      const run = await window.workers.send(activeWorker.taskId, message);
+      setActiveWorker(run);
+      return true;
+    } catch {
+      setError('This message could not be sent to the worker.');
+      return false;
+    }
+  }
+
   return (
     <main
-      className={`app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}
+      className={
+        activeWorker
+          ? 'worker-shell dark'
+          : `app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`
+      }
     >
-      <aside
-        className="exploration-sidebar"
-        id="exploration-sidebar"
-        aria-label="Explorations"
-      >
-        <div className="exploration-sidebar__header">
-          {!isSidebarCollapsed && <span>Explorations</span>}
-          <div className="exploration-sidebar__actions">
-            {!isSidebarCollapsed && (
+      {!activeWorker && (
+        <aside
+          className="exploration-sidebar"
+          id="exploration-sidebar"
+          aria-label="Explorations"
+        >
+          <div className="exploration-sidebar__header">
+            {!isSidebarCollapsed && <span>Explorations</span>}
+            <div className="exploration-sidebar__actions">
+              {!isSidebarCollapsed && (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  disabled={activeRequestId !== null}
+                  aria-label="New exploration"
+                  title="New exploration"
+                  onClick={startNewExploration}
+                >
+                  <img
+                    className="exploration-sidebar__new-icon"
+                    src={plusIcon}
+                    alt=""
+                    aria-hidden="true"
+                  />
+                </Button>
+              )}
               <Button
                 type="button"
+                variant="ghost"
                 size="icon-sm"
-                disabled={activeRequestId !== null}
-                aria-label="New exploration"
-                title="New exploration"
-                onClick={startNewExploration}
+                aria-controls="exploration-sidebar"
+                aria-expanded={!isSidebarCollapsed}
+                aria-label={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
+                title={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
+                onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
               >
                 <img
-                  className="exploration-sidebar__new-icon"
-                  src={plusIcon}
+                  className={`exploration-sidebar__toggle-icon${isSidebarCollapsed ? ' exploration-sidebar__toggle-icon--expand' : ''}`}
+                  src={sidebarCollapseIcon}
                   alt=""
                   aria-hidden="true"
                 />
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-controls="exploration-sidebar"
-              aria-expanded={!isSidebarCollapsed}
-              aria-label={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
-              title={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
-              onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
-            >
-              <img
-                className={`exploration-sidebar__toggle-icon${isSidebarCollapsed ? ' exploration-sidebar__toggle-icon--expand' : ''}`}
-                src={sidebarCollapseIcon}
-                alt=""
-                aria-hidden="true"
-              />
-            </Button>
+            </div>
           </div>
-        </div>
-        {!isSidebarCollapsed && (
-          <nav className="exploration-list">
-            {explorations.length === 0 ? (
-              <p className="exploration-list__empty">No explorations yet</p>
-            ) : (
-              explorations.map((exploration) => (
-                <Button
-                  className="exploration-list__item"
-                  type="button"
-                  variant="ghost"
-                  key={exploration.id}
-                  disabled={activeRequestId !== null}
-                  aria-current={
-                    exploration.id === activeExploration?.id
-                      ? 'page'
-                      : undefined
-                  }
-                  title={exploration.title}
-                  onClick={() => selectExploration(exploration.id)}
-                >
-                  {exploration.title}
-                </Button>
-              ))
-            )}
-          </nav>
-        )}
-      </aside>
+          {!isSidebarCollapsed && (
+            <nav className="exploration-list">
+              {explorations.length === 0 ? (
+                <p className="exploration-list__empty">No explorations yet</p>
+              ) : (
+                explorations.map((exploration) => (
+                  <Button
+                    className="exploration-list__item"
+                    type="button"
+                    variant="ghost"
+                    key={exploration.id}
+                    disabled={activeRequestId !== null}
+                    aria-current={
+                      exploration.id === activeExploration?.id
+                        ? 'page'
+                        : undefined
+                    }
+                    title={exploration.title}
+                    onClick={() => selectExploration(exploration.id)}
+                  >
+                    {exploration.title}
+                  </Button>
+                ))
+              )}
+            </nav>
+          )}
+        </aside>
+      )}
 
       {activeWorker ? (
         <WorkerScreen
           run={activeWorker}
-          onBack={() => setActiveWorker(null)}
+          diff={workerDiff}
+          error={error}
+          onBack={() => {
+            setActiveWorker(null);
+            setError(null);
+          }}
+          onSend={sendWorkerMessage}
           onStop={stopWorker}
         />
       ) : (

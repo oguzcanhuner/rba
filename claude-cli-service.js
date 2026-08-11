@@ -242,7 +242,7 @@ function beginClaudeCli(options) {
   return beginClaudeProcess({
     ...options,
     systemPrompt: planningPrompt(),
-    tools: 'Glob,Read',
+    tools: 'Glob,Grep,Read',
     allowedTools: [
       'mcp__rba__read_findings',
       'mcp__rba__update_findings',

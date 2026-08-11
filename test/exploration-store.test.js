@@ -193,7 +193,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4],
+    [1, 2, 3, 4, 5],
   );
   store.close();
 });
@@ -238,7 +238,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4],
+    [1, 2, 3, 4, 5],
   );
   store.close();
 });
@@ -266,6 +266,7 @@ test('persists a worker run and its conversation', () => {
   store.createWorkerRun('task-1', {
     branch: 'rba/task-1',
     worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
     startedAt: '2026-08-09T10:02:00.000Z',
   });
   store.saveWorkerMessage('task-1', {
@@ -281,6 +282,7 @@ test('persists a worker run and its conversation', () => {
 
   assert.equal(completed.status, 'completed');
   assert.equal(completed.sessionId, 'session-1');
+  assert.equal(completed.baseRevision, 'abc123');
   assert.equal(completed.messages[0].parts[0].text, 'Working.');
   assert.equal(store.get('exploration-1').tasks[0].status, 'completed');
   assert.throws(

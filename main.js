@@ -467,6 +467,33 @@ ipcMain.handle('workers:stop', (event, taskId) => {
   return workerService.stop(taskId);
 });
 
+ipcMain.handle('workers:send', (event, taskId, prompt) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100 ||
+    typeof prompt !== 'string' ||
+    prompt.trim().length === 0 ||
+    prompt.length > 100_000
+  ) {
+    throw new Error('Invalid worker message.');
+  }
+  return workerService.send(taskId, prompt.trim());
+});
+
+ipcMain.handle('workers:diff', (event, taskId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100
+  ) {
+    throw new Error('Invalid worker diff request.');
+  }
+  return workerService.getDiff(taskId);
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
