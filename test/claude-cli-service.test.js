@@ -59,11 +59,11 @@ test('streams text from Claude CLI JSON output', async () => {
   assert.equal(invocation.command, 'claude');
   assert.equal(
     invocation.args[invocation.args.indexOf('--tools') + 1],
-    'Glob,Grep,Read',
+    'Glob,Grep,Read,Bash,WebSearch,WebFetch',
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /Do not write or modify files/,
+    /Do not modify files/,
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
@@ -76,6 +76,9 @@ test('streams text from Claude CLI JSON output', async () => {
   assert.equal(
     invocation.args[invocation.args.indexOf('--allowedTools') + 1],
     [
+      'Bash',
+      'WebSearch',
+      'WebFetch',
       'mcp__rba__read_findings',
       'mcp__rba__update_findings',
       'mcp__rba__read_tasks',

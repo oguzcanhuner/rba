@@ -48,21 +48,27 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
       ? 'list files'
       : tool.name === 'Grep'
         ? 'search files'
-        : tool.name === 'mcp__rba__update_findings'
-          ? 'update findings'
-          : tool.name === 'mcp__rba__read_findings'
-            ? 'read findings'
-            : tool.name === 'mcp__rba__read_tasks'
-              ? 'read tasks'
-              : tool.name === 'mcp__rba__add_task'
-                ? 'draft task'
-                : tool.name === 'mcp__rba__update_task'
-                  ? 'update task'
-                  : tool.name === 'mcp__rba__remove_task'
-                    ? 'remove task'
-                    : tool.name === 'mcp__rba__commit_tasks'
-                      ? 'queue tasks'
-                      : 'read file';
+        : tool.name === 'Bash'
+          ? 'run command'
+          : tool.name === 'WebSearch'
+            ? 'search the web'
+            : tool.name === 'WebFetch'
+              ? 'fetch page'
+              : tool.name === 'mcp__rba__update_findings'
+                ? 'update findings'
+                : tool.name === 'mcp__rba__read_findings'
+                  ? 'read findings'
+                  : tool.name === 'mcp__rba__read_tasks'
+                    ? 'read tasks'
+                    : tool.name === 'mcp__rba__add_task'
+                      ? 'draft task'
+                      : tool.name === 'mcp__rba__update_task'
+                        ? 'update task'
+                        : tool.name === 'mcp__rba__remove_task'
+                          ? 'remove task'
+                          : tool.name === 'mcp__rba__commit_tasks'
+                            ? 'queue tasks'
+                            : 'read file';
 
   if (tool.status === 'running') {
     return `${action[0].toUpperCase()}${action.slice(1)}…`;
@@ -82,6 +88,18 @@ function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
 
   if (tool.name === 'Grep') {
     return 'Searched files';
+  }
+
+  if (tool.name === 'Bash') {
+    return 'Ran command';
+  }
+
+  if (tool.name === 'WebSearch') {
+    return 'Searched the web';
+  }
+
+  if (tool.name === 'WebFetch') {
+    return 'Fetched page';
   }
 
   if (tool.name === 'mcp__rba__update_findings') {
@@ -112,7 +130,13 @@ function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
   const value =
     tool.name === 'Glob' || tool.name === 'Grep'
       ? tool.input.pattern
-      : tool.input.file_path;
+      : tool.name === 'Bash'
+        ? tool.input.command
+        : tool.name === 'WebSearch'
+          ? tool.input.query
+          : tool.name === 'WebFetch'
+            ? tool.input.url
+            : tool.input.file_path;
   return typeof value === 'string' ? value : null;
 }
 
