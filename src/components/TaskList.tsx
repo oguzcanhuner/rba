@@ -6,16 +6,14 @@ type TaskListProps = {
   tasks: Task[];
   commitDisabled: boolean;
   onCommit: () => void;
-  onOpenWorker: (task: Task) => void;
-  onStartWorker: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
 };
 
 export function TaskList({
   tasks,
   commitDisabled,
   onCommit,
-  onOpenWorker,
-  onStartWorker,
+  onOpenTask,
 }: TaskListProps) {
   const draftCount = tasks.filter((task) => task.status === 'draft').length;
 
@@ -68,16 +66,16 @@ export function TaskList({
                         type="button"
                         size="sm"
                         disabled={commitDisabled}
-                        onClick={() => onStartWorker(task)}
+                        onClick={() => onOpenTask(task)}
                       >
-                        Start task
+                        Open task
                       </Button>
                     ) : (
                       <Button
                         type="button"
                         size="sm"
                         variant="secondary"
-                        onClick={() => onOpenWorker(task)}
+                        onClick={() => onOpenTask(task)}
                       >
                         Open worker
                       </Button>

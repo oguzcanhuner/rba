@@ -332,6 +332,28 @@ class ExplorationStore {
       .map((row) => ({ ...row }));
   }
 
+  listCommittedTasks() {
+    return this.database
+      .prepare(`
+        SELECT
+          t.id,
+          t.exploration_id AS explorationId,
+          e.title AS explorationTitle,
+          t.sequence,
+          t.title,
+          t.spec_markdown AS specMarkdown,
+          t.status,
+          t.created_at AS createdAt,
+          t.updated_at AS updatedAt
+        FROM tasks t
+        JOIN explorations e ON e.id = t.exploration_id
+        WHERE t.status <> 'draft'
+        ORDER BY t.created_at DESC
+      `)
+      .all()
+      .map((row) => ({ ...row }));
+  }
+
   commitTasks(explorationId) {
     const now = new Date().toISOString();
     this.database.exec('BEGIN IMMEDIATE');

@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   type KeyboardEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import type {
   DisplayPart,
   Exploration,
   ExplorationSummary,
+  SidebarTask,
   Task,
   ToolStatus,
   WorkerRun,
@@ -223,6 +225,7 @@ export function App() {
     storage: window.localStorage,
   });
   const [explorations, setExplorations] = useState<ExplorationSummary[]>([]);
+  const [sidebarTasks, setSidebarTasks] = useState<SidebarTask[]>([]);
   const [activeExploration, setActiveExploration] =
     useState<Exploration | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -233,6 +236,7 @@ export function App() {
     { id: string; text: string }[]
   >([]);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
+  const [activeTask, setActiveTask] = useState<SidebarTask | null>(null);
   const [workerDiff, setWorkerDiff] = useState('');
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -244,19 +248,29 @@ export function App() {
   const previousExplorationId = useRef<string | null>(null);
   const messages = activeExploration?.messages ?? [];
 
+  const refreshSidebarTasks = useCallback(async () => {
+    try {
+      setSidebarTasks(await window.tasks.list());
+    } catch {
+      setError('Tasks could not be loaded.');
+    }
+  }, []);
+
   useEffect(() => {
     let disposed = false;
 
     Promise.all([
       window.claude.getDefaultDirectory(),
       window.explorations.list(),
+      window.tasks.list(),
     ])
-      .then(async ([defaultDirectory, savedExplorations]) => {
+      .then(async ([defaultDirectory, savedExplorations, savedTasks]) => {
         if (disposed) {
           return;
         }
 
         setExplorations(savedExplorations);
+        setSidebarTasks(savedTasks);
         const latest = savedExplorations[0];
 
         if (latest) {
@@ -321,6 +335,7 @@ export function App() {
       }
 
       if (event.type === 'tasks-updated') {
+        void refreshSidebarTasks();
         setActiveExploration((current) =>
           current
             ? {
@@ -474,7 +489,7 @@ export function App() {
     };
 
     return window.claude.onEvent(handleEvent);
-  }, []);
+  }, [refreshSidebarTasks]);
 
   useEffect(
     () =>
@@ -498,6 +513,16 @@ export function App() {
         );
         setActiveWorker((current) =>
           current?.taskId === run.taskId ? run : current,
+        );
+        setActiveTask((current) =>
+          current?.id === run.taskId
+            ? { ...current, status: run.status }
+            : current,
+        );
+        setSidebarTasks((current) =>
+          current.map((task) =>
+            task.id === run.taskId ? { ...task, status: run.status } : task,
+          ),
         );
       }),
     [],
@@ -659,6 +684,7 @@ export function App() {
         setWorkingDirectory(directory);
         setActiveExploration(null);
         setActiveWorker(null);
+        setActiveTask(null);
         setDraft('');
         setError(null);
       }
@@ -681,6 +707,7 @@ export function App() {
         setActiveExploration(restored);
         setWorkingDirectory(restored.workingDirectory);
         setActiveWorker(null);
+        setActiveTask(null);
         setDraft('');
         setError(null);
       }
@@ -698,6 +725,7 @@ export function App() {
       await persistCurrentExploration();
       setActiveExploration(null);
       setActiveWorker(null);
+      setActiveTask(null);
       setDraft('');
       setError(null);
     } catch {
@@ -736,12 +764,13 @@ export function App() {
           ? { ...current, tasks, updatedAt: new Date().toISOString() }
           : current,
       );
+      await refreshSidebarTasks();
     } catch {
       setError('Tasks could not be queued.');
     }
   }
 
-  async function startWorker(task: Task) {
+  async function startWorker(task: SidebarTask) {
     setStartingTaskId(task.id);
     setError(null);
     try {
@@ -759,6 +788,12 @@ export function App() {
           : current,
       );
       setActiveWorker(run);
+      setActiveTask({ ...task, status: run.status });
+      setSidebarTasks((current) =>
+        current.map((item) =>
+          item.id === task.id ? { ...item, status: run.status } : item,
+        ),
+      );
     } catch {
       setError(
         'This task could not be started. Make sure the folder is a git repository.',
@@ -768,11 +803,17 @@ export function App() {
     }
   }
 
-  async function openWorker(task: Task) {
+  async function openTask(task: SidebarTask) {
     setError(null);
+    if (task.status === 'queued') {
+      setActiveTask(task);
+      setActiveWorker(null);
+      return;
+    }
     try {
       const run = await window.workers.get(task.id);
       if (run) {
+        setActiveTask(task);
         setActiveWorker(run);
       } else {
         setError('This worker could not be loaded.');
@@ -812,16 +853,16 @@ export function App() {
   return (
     <main
       className={
-        activeWorker
+        activeTask
           ? 'worker-shell dark'
           : `app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`
       }
     >
-      {!activeWorker && (
+      {!activeTask && (
         <aside
           className="exploration-sidebar"
           id="exploration-sidebar"
-          aria-label="Explorations"
+          aria-label="Explorations and tasks"
         >
           <div className="exploration-sidebar__header">
             {!isSidebarCollapsed && <span>Explorations</span>}
@@ -863,43 +904,83 @@ export function App() {
             </div>
           </div>
           {!isSidebarCollapsed && (
-            <nav className="exploration-list">
-              {explorations.length === 0 ? (
-                <p className="exploration-list__empty">No explorations yet</p>
-              ) : (
-                explorations.map((exploration) => (
-                  <Button
-                    className="exploration-list__item"
-                    type="button"
-                    variant="ghost"
-                    key={exploration.id}
-                    disabled={activeRequestId !== null}
-                    aria-current={
-                      exploration.id === activeExploration?.id
-                        ? 'page'
-                        : undefined
-                    }
-                    title={exploration.title}
-                    onClick={() => selectExploration(exploration.id)}
-                  >
-                    {exploration.title}
-                  </Button>
-                ))
-              )}
-            </nav>
+            <div className="sidebar-content">
+              <nav className="exploration-list" aria-label="Explorations">
+                {explorations.length === 0 ? (
+                  <p className="exploration-list__empty">No explorations yet</p>
+                ) : (
+                  explorations.map((exploration) => (
+                    <Button
+                      className="exploration-list__item"
+                      type="button"
+                      variant="ghost"
+                      key={exploration.id}
+                      disabled={activeRequestId !== null}
+                      aria-current={
+                        exploration.id === activeExploration?.id
+                          ? 'page'
+                          : undefined
+                      }
+                      title={exploration.title}
+                      onClick={() => selectExploration(exploration.id)}
+                    >
+                      {exploration.title}
+                    </Button>
+                  ))
+                )}
+              </nav>
+              <section
+                className="sidebar-tasks"
+                aria-labelledby="sidebar-tasks-heading"
+              >
+                <h2 id="sidebar-tasks-heading">Tasks</h2>
+                {sidebarTasks.length === 0 ? (
+                  <p className="exploration-list__empty">No queued tasks yet</p>
+                ) : (
+                  <div className="sidebar-task-list">
+                    {sidebarTasks.map((task) => (
+                      <Button
+                        className="sidebar-task"
+                        type="button"
+                        variant="ghost"
+                        key={task.id}
+                        title={task.title}
+                        onClick={() => openTask(task)}
+                      >
+                        <span className="sidebar-task__title">
+                          {task.title}
+                        </span>
+                        <span
+                          className={`sidebar-task__status task__status task__status--${task.status}`}
+                        >
+                          {task.status}
+                        </span>
+                        <span className="sidebar-task__exploration">
+                          {task.explorationTitle}
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
           )}
         </aside>
       )}
 
-      {activeWorker ? (
+      {activeTask ? (
         <WorkerScreen
+          task={activeTask}
           run={activeWorker}
           diff={workerDiff}
           error={error}
+          isStarting={startingTaskId === activeTask.id}
           onBack={() => {
+            setActiveTask(null);
             setActiveWorker(null);
             setError(null);
           }}
+          onStart={() => startWorker(activeTask)}
           onSend={sendWorkerMessage}
           onStop={stopWorker}
         />
@@ -949,8 +1030,15 @@ export function App() {
                       activeRequestId !== null || startingTaskId !== null
                     }
                     onCommit={commitTasks}
-                    onOpenWorker={openWorker}
-                    onStartWorker={startWorker}
+                    onOpenTask={(task) => {
+                      if (activeExploration) {
+                        void openTask({
+                          ...task,
+                          explorationId: activeExploration.id,
+                          explorationTitle: activeExploration.title,
+                        });
+                      }
+                    }}
                   />
                 )}
               </div>

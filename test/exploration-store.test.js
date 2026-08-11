@@ -173,6 +173,10 @@ test('lists tasks with stable sequence order and commits drafts', () => {
       { id: 'task-2', sequence: 2, status: 'queued' },
     ],
   );
+  assert.deepEqual(
+    store.listCommittedTasks().map(({ id }) => id),
+    ['task-2'],
+  );
 
   const committed = store.commitTasks('exploration-1');
   assert.deepEqual(
@@ -180,6 +184,27 @@ test('lists tasks with stable sequence order and commits drafts', () => {
     [
       { id: 'task-1', status: 'queued' },
       { id: 'task-2', status: 'queued' },
+    ],
+  );
+  assert.deepEqual(
+    store
+      .listCommittedTasks()
+      .map(({ id, explorationId, explorationTitle }) => ({
+        id,
+        explorationId,
+        explorationTitle,
+      })),
+    [
+      {
+        id: 'task-2',
+        explorationId: 'exploration-1',
+        explorationTitle: 'Plan persistent conversations',
+      },
+      {
+        id: 'task-1',
+        explorationId: 'exploration-1',
+        explorationTitle: 'Plan persistent conversations',
+      },
     ],
   );
   store.close();

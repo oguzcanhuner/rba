@@ -431,6 +431,14 @@ ipcMain.handle('explorations:commit-tasks', (event, explorationId) => {
   return explorationStore.commitTasks(explorationId);
 });
 
+ipcMain.handle('tasks:list', (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted task request.');
+  }
+
+  return explorationStore.listCommittedTasks();
+});
+
 ipcMain.handle('workers:get', (event, taskId) => {
   if (
     !isTrustedSender(event.senderFrame) ||

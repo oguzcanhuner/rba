@@ -219,9 +219,12 @@
 }
 
 .exploration-list {
+  padding: 0 8px 16px;
+}
+
+.sidebar-content {
   min-height: 0;
   overflow-y: auto;
-  padding: 0 8px 12px;
 }
 
 .exploration-list .exploration-list__item {
@@ -250,6 +253,62 @@
   margin: 8px;
   color: var(--muted-foreground);
   font-size: 0.75rem;
+}
+
+.sidebar-tasks {
+  padding: 14px 8px 12px;
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.sidebar-tasks h2 {
+  margin: 0 8px 8px;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sidebar-task-list {
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-task-list .sidebar-task {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  height: auto;
+  padding: 8px;
+  text-align: left;
+}
+
+.sidebar-task__title,
+.sidebar-task__exploration {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-task__title {
+  color: var(--sidebar-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.sidebar-task__status {
+  margin-left: 8px;
+  align-self: center;
+  font-size: 0.5625rem;
+}
+
+.sidebar-task__exploration {
+  grid-column: 1 / -1;
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 400;
 }
 
 .chat {
@@ -662,6 +721,10 @@
   background: color-mix(in srgb, var(--status-running) 14%, transparent);
 }
 
+.worker-status--queued {
+  color: var(--primary);
+}
+
 .worker-status--completed {
   color: var(--status-success);
   background: color-mix(in srgb, var(--status-success) 14%, transparent);
@@ -687,6 +750,32 @@
 
 .worker-workspace {
   min-height: 0;
+}
+
+.task-ready {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.task-ready__content {
+  width: min(760px, calc(100% - 48px));
+  margin: 48px auto;
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+}
+
+.task-ready__source {
+  margin: 0 0 24px;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.task-ready__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 32px;
 }
 
 .worker-review {

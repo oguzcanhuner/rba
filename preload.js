@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('explorations', {
     ipcRenderer.invoke('explorations:commit-tasks', explorationId),
 });
 
+contextBridge.exposeInMainWorld('tasks', {
+  list: () => ipcRenderer.invoke('tasks:list'),
+});
+
 contextBridge.exposeInMainWorld('workers', {
   get: (taskId) => ipcRenderer.invoke('workers:get', taskId),
   start: (taskId) => ipcRenderer.invoke('workers:start', taskId),

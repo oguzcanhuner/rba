@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
-import type { DisplayPart, WorkerRun } from '../claude';
+import type { DisplayPart, SidebarTask, WorkerRun } from '../claude';
 import { MarkdownContent } from './MarkdownContent';
 import { Button } from './ui/button';
 import {
@@ -19,11 +19,14 @@ import { Textarea } from './ui/textarea';
 import { parseWorkerDiff, WorkerDiff, WorkerFileTree } from './WorkerDiff';
 
 type WorkerScreenProps = {
-  run: WorkerRun;
+  task: SidebarTask;
+  run: WorkerRun | null;
   diff: string;
   error: string | null;
+  isStarting: boolean;
   onBack: () => void;
   onSend: (message: string) => Promise<boolean>;
+  onStart: () => void;
   onStop: () => void;
 };
 
@@ -75,11 +78,14 @@ function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
 }
 
 export function WorkerScreen({
+  task,
   run,
   diff,
   error,
+  isStarting,
   onBack,
   onSend,
+  onStart,
   onStop,
 }: WorkerScreenProps) {
   const workerLayout = useDefaultLayout({
@@ -114,7 +120,13 @@ export function WorkerScreen({
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = draft.trim();
-    if (!message || isSending || run.status === 'working' || !run.sessionId) {
+    if (
+      !run ||
+      !message ||
+      isSending ||
+      run.status === 'working' ||
+      !run.sessionId
+    ) {
       return;
     }
     setIsSending(true);
@@ -144,13 +156,45 @@ export function WorkerScreen({
       ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
+  if (!run) {
+    return (
+      <section className="worker-screen">
+        <header className="worker-screen__header">
+          <Button type="button" size="sm" variant="ghost" onClick={onBack}>
+            ← Back
+          </Button>
+          <h1>{task.title}</h1>
+          <span className="worker-status worker-status--queued">● queued</span>
+        </header>
+        <main className="task-ready">
+          <div className="task-ready__content">
+            <p className="task-ready__source">From {task.explorationTitle}</p>
+            {task.specMarkdown ? (
+              <MarkdownContent className="typeset-task">
+                {task.specMarkdown}
+              </MarkdownContent>
+            ) : (
+              <p>No specification.</p>
+            )}
+            {error && <div className="error-message">{error}</div>}
+            <div className="task-ready__actions">
+              <Button type="button" disabled={isStarting} onClick={onStart}>
+                {isStarting ? 'Starting…' : 'Start task'}
+              </Button>
+            </div>
+          </div>
+        </main>
+      </section>
+    );
+  }
+
   return (
     <section className="worker-screen">
       <header className="worker-screen__header">
         <Button type="button" size="sm" variant="ghost" onClick={onBack}>
-          ← Exploration
+          ← Back
         </Button>
-        <h1>{run.title}</h1>
+        <h1>{task.title}</h1>
         <span className={`worker-status worker-status--${run.status}`}>
           ● {run.status}
         </span>

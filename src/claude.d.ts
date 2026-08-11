@@ -104,6 +104,11 @@ export type Task = {
   updatedAt: string;
 };
 
+export type SidebarTask = Task & {
+  explorationId: string;
+  explorationTitle: string;
+};
+
 export type Exploration = ExplorationSummary & {
   agentSession: AgentSession | null;
   findingsMarkdown: string | null;
@@ -144,6 +149,9 @@ declare global {
       get(id: string): Promise<Exploration | null>;
       save(exploration: Exploration): Promise<void>;
       commitTasks(explorationId: string): Promise<Task[]>;
+    };
+    tasks: {
+      list(): Promise<SidebarTask[]>;
     };
     workers: {
       get(taskId: string): Promise<WorkerRun | null>;
