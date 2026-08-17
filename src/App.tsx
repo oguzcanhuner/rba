@@ -12,7 +12,6 @@ import type {
   GoalSummary,
   SidebarTask,
   Task,
-  WorkerRun,
 } from './claude';
 import { Composer } from './components/Composer';
 import { FindingsPanel } from './components/FindingsPanel';
@@ -25,6 +24,7 @@ import {
 } from './components/ui/resizable';
 import { WorkerScreen } from './components/WorkerScreen';
 import { useGoalStream } from './hooks/useGoalStream';
+import { useWorkerRuns } from './hooks/useWorkerRuns';
 import {
   byNewestCreation,
   goalTitle,
@@ -47,10 +47,6 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
-  const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
-  const [activeTask, setActiveTask] = useState<SidebarTask | null>(null);
-  const [workerDiff, setWorkerDiff] = useState('');
-  const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesContainer = useRef<HTMLElement>(null);
   const shouldFollowMessages = useRef(true);
@@ -144,6 +140,18 @@ export function App() {
     startRequest: startGoalRequest,
   });
 
+  const {
+    activeTask,
+    activeWorker,
+    diff: workerDiff,
+    startingTaskId,
+    close: closeWorker,
+    open: openTask,
+    start: startWorker,
+    stop: stopWorker,
+    send: sendWorkerMessage,
+  } = useWorkerRuns({ setActiveGoal, setSidebarTasks, setError });
+
   useEffect(() => {
     let disposed = false;
 
@@ -207,84 +215,6 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [activeGoal]);
 
-  useEffect(
-    () =>
-      window.workers.onEvent((event) => {
-        const { run } = event;
-        // A worker broadcasts on every streamed delta, so only build new state
-        // when the status actually moved. Otherwise each delta gives the goal a
-        // fresh identity and the autosave effect rewrites the whole planner
-        // conversation to disk, over and over, for the length of the run.
-        setActiveGoal((current) => {
-          if (
-            current?.id !== run.goalId ||
-            !current.tasks.some(
-              (task) => task.id === run.taskId && task.status !== run.status,
-            )
-          ) {
-            return current;
-          }
-
-          return {
-            ...current,
-            tasks: current.tasks.map((task) =>
-              task.id === run.taskId
-                ? {
-                    ...task,
-                    status: run.status,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : task,
-            ),
-          };
-        });
-        setActiveWorker((current) =>
-          current?.taskId === run.taskId ? run : current,
-        );
-        setActiveTask((current) =>
-          current?.id === run.taskId && current.status !== run.status
-            ? { ...current, status: run.status }
-            : current,
-        );
-        setSidebarTasks((current) =>
-          current.some(
-            (task) => task.id === run.taskId && task.status !== run.status,
-          )
-            ? current.map((task) =>
-                task.id === run.taskId ? { ...task, status: run.status } : task,
-              )
-            : current,
-        );
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    if (!activeWorker) {
-      setWorkerDiff('');
-      return;
-    }
-
-    let disposed = false;
-    const timeout = window.setTimeout(() => {
-      window.workers
-        .diff(activeWorker.taskId)
-        .then((diff) => {
-          if (!disposed) {
-            setWorkerDiff(diff.patch);
-          }
-        })
-        .catch(() => {
-          // A worker update can arrive while its worktree is still being created.
-        });
-    }, 150);
-
-    return () => {
-      disposed = true;
-      window.clearTimeout(timeout);
-    };
-  }, [activeWorker]);
-
   useEffect(() => {
     const goalId = activeGoal?.id ?? null;
     if (goalId !== previousGoalId.current) {
@@ -333,8 +263,7 @@ export function App() {
         await persistCurrentGoal();
         setWorkingDirectory(directory);
         setActiveGoal(null);
-        setActiveWorker(null);
-        setActiveTask(null);
+        closeWorker();
         setDraft('');
         setError(null);
       }
@@ -356,8 +285,7 @@ export function App() {
         const restored = restoreInterruptedMessages(goal);
         setActiveGoal(restored);
         setWorkingDirectory(restored.workingDirectory);
-        setActiveWorker(null);
-        setActiveTask(null);
+        closeWorker();
         setDraft('');
         setError(null);
       }
@@ -374,8 +302,7 @@ export function App() {
     try {
       await persistCurrentGoal();
       setActiveGoal(null);
-      setActiveWorker(null);
-      setActiveTask(null);
+      closeWorker();
       setDraft('');
       setError(null);
     } catch {
@@ -398,86 +325,6 @@ export function App() {
       refreshSidebarTasks();
     } catch {
       setError('Tasks could not be queued.');
-    }
-  }
-
-  async function startWorker(task: SidebarTask) {
-    setStartingTaskId(task.id);
-    setError(null);
-    try {
-      const run = await window.workers.start(task.id);
-      setActiveGoal((current) =>
-        current
-          ? {
-              ...current,
-              tasks: current.tasks.map((currentTask) =>
-                currentTask.id === task.id
-                  ? { ...currentTask, status: run.status }
-                  : currentTask,
-              ),
-            }
-          : current,
-      );
-      setActiveWorker(run);
-      setActiveTask({ ...task, status: run.status });
-      setSidebarTasks((current) =>
-        current.map((item) =>
-          item.id === task.id ? { ...item, status: run.status } : item,
-        ),
-      );
-    } catch {
-      setError(
-        'This task could not be started. Make sure the folder is a git repository.',
-      );
-    } finally {
-      setStartingTaskId(null);
-    }
-  }
-
-  async function openTask(task: SidebarTask) {
-    setError(null);
-    if (task.status === 'queued') {
-      setActiveTask(task);
-      setActiveWorker(null);
-      return;
-    }
-    try {
-      const run = await window.workers.get(task.id);
-      if (run) {
-        setActiveTask(task);
-        setActiveWorker(run);
-      } else {
-        setError('This worker could not be loaded.');
-      }
-    } catch {
-      setError('This worker could not be loaded.');
-    }
-  }
-
-  async function stopWorker() {
-    if (activeWorker?.status !== 'working') {
-      return;
-    }
-    try {
-      const run = await window.workers.stop(activeWorker.taskId);
-      setActiveWorker(run);
-    } catch {
-      setError('This worker could not be stopped.');
-    }
-  }
-
-  async function sendWorkerMessage(message: string) {
-    if (!activeWorker || activeWorker.status === 'working') {
-      return false;
-    }
-    setError(null);
-    try {
-      const run = await window.workers.send(activeWorker.taskId, message);
-      setActiveWorker(run);
-      return true;
-    } catch {
-      setError('This message could not be sent to the worker.');
-      return false;
     }
   }
 
@@ -513,8 +360,7 @@ export function App() {
           error={error}
           isStarting={startingTaskId === activeTask.id}
           onBack={() => {
-            setActiveTask(null);
-            setActiveWorker(null);
+            closeWorker();
             setError(null);
           }}
           onStart={() => startWorker(activeTask)}
