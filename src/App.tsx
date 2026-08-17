@@ -494,34 +494,49 @@ export function App() {
     () =>
       window.workers.onEvent((event) => {
         const { run } = event;
-        setActiveGoal((current) =>
-          current?.id === run.goalId
-            ? {
-                ...current,
-                tasks: current.tasks.map((task) =>
-                  task.id === run.taskId
-                    ? {
-                        ...task,
-                        status: run.status,
-                        updatedAt: new Date().toISOString(),
-                      }
-                    : task,
-                ),
-              }
-            : current,
-        );
+        // A worker broadcasts on every streamed delta, so only build new state
+        // when the status actually moved. Otherwise each delta gives the goal a
+        // fresh identity and the autosave effect rewrites the whole planner
+        // conversation to disk, over and over, for the length of the run.
+        setActiveGoal((current) => {
+          if (
+            current?.id !== run.goalId ||
+            !current.tasks.some(
+              (task) => task.id === run.taskId && task.status !== run.status,
+            )
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            tasks: current.tasks.map((task) =>
+              task.id === run.taskId
+                ? {
+                    ...task,
+                    status: run.status,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : task,
+            ),
+          };
+        });
         setActiveWorker((current) =>
           current?.taskId === run.taskId ? run : current,
         );
         setActiveTask((current) =>
-          current?.id === run.taskId
+          current?.id === run.taskId && current.status !== run.status
             ? { ...current, status: run.status }
             : current,
         );
         setSidebarTasks((current) =>
-          current.map((task) =>
-            task.id === run.taskId ? { ...task, status: run.status } : task,
-          ),
+          current.some(
+            (task) => task.id === run.taskId && task.status !== run.status,
+          )
+            ? current.map((task) =>
+                task.id === run.taskId ? { ...task, status: run.status } : task,
+              )
+            : current,
         );
       }),
     [],
