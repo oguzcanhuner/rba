@@ -174,7 +174,7 @@
   scrollbar-color: var(--input) transparent;
 }
 
-.exploration-sidebar {
+.goal-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
@@ -182,7 +182,7 @@
   background: var(--sidebar);
 }
 
-.exploration-sidebar__header {
+.goal-sidebar__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -192,33 +192,33 @@
   font-weight: 600;
 }
 
-.exploration-sidebar__actions {
+.goal-sidebar__actions {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-left: auto;
 }
 
-.exploration-sidebar__toggle-icon {
+.goal-sidebar__toggle-icon {
   width: 16px;
   height: 16px;
 }
 
-.exploration-sidebar__new-icon {
+.goal-sidebar__new-icon {
   width: 16px;
   height: 16px;
 }
 
-.exploration-sidebar__toggle-icon--expand {
+.goal-sidebar__toggle-icon--expand {
   transform: rotate(180deg);
 }
 
-.app-shell--sidebar-collapsed .exploration-sidebar__header {
+.app-shell--sidebar-collapsed .goal-sidebar__header {
   justify-content: center;
   padding-inline: 8px;
 }
 
-.exploration-list {
+.goal-list {
   padding: 0 8px 16px;
 }
 
@@ -227,7 +227,7 @@
   overflow-y: auto;
 }
 
-.exploration-list .exploration-list__item {
+.goal-list .goal-list__item {
   display: block;
   width: 100%;
   height: auto;
@@ -243,13 +243,13 @@
   white-space: nowrap;
 }
 
-.exploration-list .exploration-list__item[aria-current="page"] {
+.goal-list .goal-list__item[aria-current="page"] {
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
   font-weight: 500;
 }
 
-.exploration-list__empty {
+.goal-list__empty {
   margin: 8px;
   color: var(--muted-foreground);
   font-size: 0.75rem;
@@ -284,7 +284,7 @@
 }
 
 .sidebar-task__title,
-.sidebar-task__exploration {
+.sidebar-task__goal {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -303,7 +303,7 @@
   font-size: 0.5625rem;
 }
 
-.sidebar-task__exploration {
+.sidebar-task__goal {
   grid-column: 1 / -1;
   margin-top: 3px;
   color: var(--muted-foreground);
@@ -1537,31 +1537,31 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .exploration-sidebar {
+  .goal-sidebar {
     display: block;
     border-right: 0;
     border-bottom: 1px solid var(--sidebar-border);
   }
 
-  .exploration-sidebar__header {
+  .goal-sidebar__header {
     padding: 8px 12px;
   }
 
-  .exploration-list {
+  .goal-list {
     display: flex;
     gap: 4px;
     overflow-x: auto;
     padding: 0 8px 8px;
   }
 
-  .exploration-list .exploration-list__item {
+  .goal-list .goal-list__item {
     width: auto;
     max-width: 180px;
     margin: 0;
     flex: 0 0 auto;
   }
 
-  .exploration-list__empty {
+  .goal-list__empty {
     display: none;
   }
 }

@@ -4,11 +4,11 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { test } = require('node:test');
-const { ExplorationStore } = require('../exploration-store');
+const { GoalStore } = require('../goal-store');
 
-function exploration(overrides = {}) {
+function goal(overrides = {}) {
   return {
-    id: 'exploration-1',
+    id: 'goal-1',
     title: 'Plan persistent conversations',
     workingDirectory: '/workspace',
     agentSession: null,
@@ -28,12 +28,12 @@ function exploration(overrides = {}) {
   };
 }
 
-test('persists and lists explorations', () => {
-  const store = new ExplorationStore(':memory:');
-  const saved = exploration();
-  const newer = exploration({
-    id: 'exploration-2',
-    title: 'A newer exploration',
+test('persists and lists goals', () => {
+  const store = new GoalStore(':memory:');
+  const saved = goal();
+  const newer = goal({
+    id: 'goal-2',
+    title: 'A newer goal',
     messages: [],
     createdAt: '2026-08-09T11:00:00.000Z',
     updatedAt: '2026-08-09T11:00:00.000Z',
@@ -68,8 +68,8 @@ test('persists and lists explorations', () => {
 });
 
 test('stores provider-neutral agent sessions and message updates', () => {
-  const store = new ExplorationStore(':memory:');
-  const initial = exploration();
+  const store = new GoalStore(':memory:');
+  const initial = goal();
   const agentSession = {
     id: 'agent-session-1',
     provider: 'claude',
@@ -78,7 +78,7 @@ test('stores provider-neutral agent sessions and message updates', () => {
     createdAt: initial.createdAt,
     updatedAt: '2026-08-09T10:01:00.000Z',
   };
-  const updated = exploration({
+  const updated = goal({
     agentSession,
     messages: [
       ...initial.messages,
@@ -111,32 +111,30 @@ test('stores provider-neutral agent sessions and message updates', () => {
   store.close();
 });
 
-test('persists findings as part of an exploration', () => {
-  const store = new ExplorationStore(':memory:');
-  store.save(
-    exploration({ findingsMarkdown: '# Findings\n\nA durable decision.' }),
-  );
+test('persists findings as part of a goal', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal({ findingsMarkdown: '# Findings\n\nA durable decision.' }));
 
   assert.equal(
-    store.get('exploration-1').findingsMarkdown,
+    store.get('goal-1').findingsMarkdown,
     '# Findings\n\nA durable decision.',
   );
   store.close();
 });
 
 test('lists tasks with stable sequence order and commits drafts', () => {
-  const store = new ExplorationStore(':memory:');
-  store.save(exploration());
+  const store = new GoalStore(':memory:');
+  store.save(goal());
   store.database
     .prepare(`
       INSERT INTO tasks (
-        id, exploration_id, sequence, title, spec_markdown, status,
+        id, goal_id, sequence, title, spec_markdown, status,
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       'task-2',
-      'exploration-1',
+      'goal-1',
       2,
       'Second task',
       '## Goal\n\nSecond.',
@@ -147,13 +145,13 @@ test('lists tasks with stable sequence order and commits drafts', () => {
   store.database
     .prepare(`
       INSERT INTO tasks (
-        id, exploration_id, sequence, title, spec_markdown, status,
+        id, goal_id, sequence, title, spec_markdown, status,
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       'task-1',
-      'exploration-1',
+      'goal-1',
       1,
       'First task',
       '## Goal\n\nFirst.',
@@ -163,7 +161,7 @@ test('lists tasks with stable sequence order and commits drafts', () => {
     );
 
   assert.deepEqual(
-    store.get('exploration-1').tasks.map(({ id, sequence, status }) => ({
+    store.get('goal-1').tasks.map(({ id, sequence, status }) => ({
       id,
       sequence,
       status,
@@ -178,7 +176,7 @@ test('lists tasks with stable sequence order and commits drafts', () => {
     ['task-2'],
   );
 
-  const committed = store.commitTasks('exploration-1');
+  const committed = store.commitTasks('goal-1');
   assert.deepEqual(
     committed.map(({ id, status }) => ({ id, status })),
     [
@@ -187,23 +185,21 @@ test('lists tasks with stable sequence order and commits drafts', () => {
     ],
   );
   assert.deepEqual(
-    store
-      .listCommittedTasks()
-      .map(({ id, explorationId, explorationTitle }) => ({
-        id,
-        explorationId,
-        explorationTitle,
-      })),
+    store.listCommittedTasks().map(({ id, goalId, goalTitle }) => ({
+      id,
+      goalId,
+      goalTitle,
+    })),
     [
       {
         id: 'task-2',
-        explorationId: 'exploration-1',
-        explorationTitle: 'Plan persistent conversations',
+        goalId: 'goal-1',
+        goalTitle: 'Plan persistent conversations',
       },
       {
         id: 'task-1',
-        explorationId: 'exploration-1',
-        explorationTitle: 'Plan persistent conversations',
+        goalId: 'goal-1',
+        goalTitle: 'Plan persistent conversations',
       },
     ],
   );
@@ -211,7 +207,7 @@ test('lists tasks with stable sequence order and commits drafts', () => {
 });
 
 test('records each applied schema migration', () => {
-  const store = new ExplorationStore(':memory:');
+  const store = new GoalStore(':memory:');
 
   assert.deepEqual(
     store.database
@@ -225,23 +221,23 @@ test('records each applied schema migration', () => {
 
 test('repairs a missing findings column even when migration 2 is marked complete', (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-store-test-'));
-  const filename = path.join(directory, 'explorations.sqlite3');
+  const filename = path.join(directory, 'goals.sqlite3');
   t.after(() => rmSync(directory, { force: true, recursive: true }));
 
   const oldDatabase = new DatabaseSync(filename);
   oldDatabase.exec(`
     CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
     INSERT INTO schema_migrations(version) VALUES (2);
-    CREATE TABLE explorations (
+    CREATE TABLE goals (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       working_directory TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-    INSERT INTO explorations VALUES (
+    INSERT INTO goals VALUES (
       'existing',
-      'Existing exploration',
+      'Existing goal',
       '/workspace',
       '2026-08-09T10:00:00.000Z',
       '2026-08-09T10:00:00.000Z'
@@ -249,11 +245,11 @@ test('repairs a missing findings column even when migration 2 is marked complete
   `);
   oldDatabase.close();
 
-  const store = new ExplorationStore(filename);
+  const store = new GoalStore(filename);
   assert.equal(store.get('existing').findingsMarkdown, null);
   assert.equal(
     store.database
-      .prepare('PRAGMA table_info(explorations)')
+      .prepare('PRAGMA table_info(goals)')
       .all()
       .some((column) => column.name === 'findings_markdown'),
     true,
@@ -269,18 +265,18 @@ test('repairs a missing findings column even when migration 2 is marked complete
 });
 
 test('persists a worker run and its conversation', () => {
-  const store = new ExplorationStore(':memory:');
-  store.save(exploration());
+  const store = new GoalStore(':memory:');
+  store.save(goal());
   store.database
     .prepare(`
       INSERT INTO tasks (
-        id, exploration_id, sequence, title, spec_markdown, status,
+        id, goal_id, sequence, title, spec_markdown, status,
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
     `)
     .run(
       'task-1',
-      'exploration-1',
+      'goal-1',
       1,
       'Implement workers',
       'Build the worker.',
@@ -309,7 +305,7 @@ test('persists a worker run and its conversation', () => {
   assert.equal(completed.sessionId, 'session-1');
   assert.equal(completed.baseRevision, 'abc123');
   assert.equal(completed.messages[0].parts[0].text, 'Working.');
-  assert.equal(store.get('exploration-1').tasks[0].status, 'completed');
+  assert.equal(store.get('goal-1').tasks[0].status, 'completed');
   assert.throws(
     () =>
       store.createWorkerRun('task-1', {
@@ -323,18 +319,18 @@ test('persists a worker run and its conversation', () => {
 });
 
 test('marks unfinished workers and tool activity as failed on restart', () => {
-  const store = new ExplorationStore(':memory:');
-  store.save(exploration());
+  const store = new GoalStore(':memory:');
+  store.save(goal());
   store.database
     .prepare(`
       INSERT INTO tasks (
-        id, exploration_id, sequence, title, spec_markdown, status,
+        id, goal_id, sequence, title, spec_markdown, status,
         created_at, updated_at
       ) VALUES (?, ?, 1, ?, ?, 'queued', ?, ?)
     `)
     .run(
       'task-1',
-      'exploration-1',
+      'goal-1',
       'Implement workers',
       'Build the worker.',
       '2026-08-09T10:01:00.000Z',

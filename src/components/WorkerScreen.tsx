@@ -168,7 +168,7 @@ export function WorkerScreen({
         </header>
         <main className="task-ready">
           <div className="task-ready__content">
-            <p className="task-ready__source">From {task.explorationTitle}</p>
+            <p className="task-ready__source">From {task.goalTitle}</p>
             {task.specMarkdown ? (
               <MarkdownContent className="typeset-task">
                 {task.specMarkdown}

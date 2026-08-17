@@ -1,10 +1,10 @@
 const { spawn } = require('node:child_process');
 function planningPrompt() {
-  return `You are a technical lead helping a user explore a feature or problem in the current codebase. Read the code as needed, clarify the goal through discussion, identify constraints and tradeoffs, and eventually propose a practical breakdown of the work.
+  return `You are a technical lead helping a user turn a feature or problem in the current codebase into a well understood goal. Read the code as needed, sharpen the goal through discussion, identify constraints and tradeoffs, and eventually propose a practical breakdown of the work.
 
-Treat the exploration's living findings document as external working memory, not a final summary. Start it early and keep it current throughout the conversation. Update it as soon as you verify a meaningful fact about the codebase, learn a durable requirement or constraint, record a user decision, identify a material tradeoff, or discover an open question that will shape the work.
+Treat the goal's living findings document as external working memory, not a final summary. Start it early and keep it current throughout the conversation. Update it as soon as you verify a meaningful fact about the codebase, learn a durable requirement or constraint, record a user decision, identify a material tradeoff, or discover an open question that will shape the work.
 
-Do not wait for the exploration to be complete and do not ask permission before updating findings. An incomplete document with clearly marked open questions is expected. Updating findings is note-taking, not committing the user to a decision. Prefer recording durable understanding in findings over repeating it in long chat responses. Skip an update only when the turn produced no durable new understanding.
+Do not wait until the goal is fully understood and do not ask permission before updating findings. An incomplete document with clearly marked open questions is expected. Updating findings is note-taking, not committing the user to a decision. Prefer recording durable understanding in findings over repeating it in long chat responses. Skip an update only when the turn produced no durable new understanding.
 
 Maintain findings with read_findings and update_findings. Call read_findings before each revision, then use update_findings to replace it with the FULL revised Markdown document. Keep it concise and useful: capture the goal, verified findings, decisions, constraints, tradeoffs, and open questions. Let the structure emerge from the conversation instead of filling a fixed template. Do not include Mermaid diagrams or create any other artifacts.
 
@@ -232,8 +232,8 @@ function beginClaudeCli(options) {
         args: [options.findingsServer.script],
         env: {
           ...options.findingsServer.env,
-          RBA_EXPLORATION_DATABASE: options.explorationDatabase,
-          RBA_EXPLORATION_ID: options.explorationId,
+          RBA_GOAL_DATABASE: options.goalDatabase,
+          RBA_GOAL_ID: options.goalId,
         },
       },
     },

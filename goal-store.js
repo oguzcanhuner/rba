@@ -19,13 +19,13 @@ const migrations = [
   {
     version: 1,
     isApplied(database) {
-      return ['explorations', 'agent_sessions', 'messages'].every((table) =>
+      return ['goals', 'agent_sessions', 'messages'].every((table) =>
         hasTable(database, table),
       );
     },
     up(database) {
       database.exec(`
-        CREATE TABLE IF NOT EXISTS explorations (
+        CREATE TABLE IF NOT EXISTS goals (
           id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
           working_directory TEXT NOT NULL,
@@ -35,7 +35,7 @@ const migrations = [
 
         CREATE TABLE IF NOT EXISTS agent_sessions (
           id TEXT PRIMARY KEY,
-          exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+          goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
           provider TEXT NOT NULL,
           external_id TEXT NOT NULL,
           metadata_json TEXT NOT NULL,
@@ -44,33 +44,31 @@ const migrations = [
           updated_at TEXT NOT NULL
         );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS active_session_by_exploration
-          ON agent_sessions(exploration_id) WHERE is_active = 1;
+        CREATE UNIQUE INDEX IF NOT EXISTS active_session_by_goal
+          ON agent_sessions(goal_id) WHERE is_active = 1;
 
         CREATE TABLE IF NOT EXISTS messages (
           id TEXT PRIMARY KEY,
-          exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+          goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
           position INTEGER NOT NULL,
           role TEXT NOT NULL,
           status TEXT NOT NULL,
           parts_json TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS messages_by_exploration
-          ON messages(exploration_id, position);
+        CREATE INDEX IF NOT EXISTS messages_by_goal
+          ON messages(goal_id, position);
       `);
     },
   },
   {
     version: 2,
     isApplied(database) {
-      return hasColumn(database, 'explorations', 'findings_markdown');
+      return hasColumn(database, 'goals', 'findings_markdown');
     },
     up(database) {
-      if (!hasColumn(database, 'explorations', 'findings_markdown')) {
-        database.exec(
-          'ALTER TABLE explorations ADD COLUMN findings_markdown TEXT',
-        );
+      if (!hasColumn(database, 'goals', 'findings_markdown')) {
+        database.exec('ALTER TABLE goals ADD COLUMN findings_markdown TEXT');
       }
     },
   },
@@ -83,18 +81,18 @@ const migrations = [
       database.exec(`
         CREATE TABLE IF NOT EXISTS tasks (
           id TEXT PRIMARY KEY,
-          exploration_id TEXT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+          goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
           sequence INTEGER NOT NULL,
           title TEXT NOT NULL,
           spec_markdown TEXT NOT NULL,
           status TEXT NOT NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          UNIQUE (exploration_id, sequence)
+          UNIQUE (goal_id, sequence)
         );
 
-        CREATE INDEX IF NOT EXISTS tasks_by_exploration
-          ON tasks(exploration_id, sequence);
+        CREATE INDEX IF NOT EXISTS tasks_by_goal
+          ON tasks(goal_id, sequence);
       `);
     },
   },
@@ -183,7 +181,7 @@ function migrate(database) {
   }
 }
 
-class ExplorationStore {
+class GoalStore {
   constructor(filename) {
     this.database = new DatabaseSync(filename);
     this.database.exec(`
@@ -193,8 +191,8 @@ class ExplorationStore {
     `);
     migrate(this.database);
 
-    this.upsertExploration = this.database.prepare(`
-      INSERT INTO explorations (
+    this.upsertGoal = this.database.prepare(`
+      INSERT INTO goals (
         id, title, working_directory, findings_markdown, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -204,11 +202,11 @@ class ExplorationStore {
         updated_at = excluded.updated_at
     `);
     this.deactivateSessions = this.database.prepare(`
-      UPDATE agent_sessions SET is_active = 0 WHERE exploration_id = ?
+      UPDATE agent_sessions SET is_active = 0 WHERE goal_id = ?
     `);
     this.upsertSession = this.database.prepare(`
       INSERT INTO agent_sessions (
-        id, exploration_id, provider, external_id, metadata_json,
+        id, goal_id, provider, external_id, metadata_json,
         is_active, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -220,10 +218,10 @@ class ExplorationStore {
     `);
     this.upsertMessage = this.database.prepare(`
       INSERT INTO messages (
-        id, exploration_id, position, role, status, parts_json
+        id, goal_id, position, role, status, parts_json
       ) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        exploration_id = excluded.exploration_id,
+        goal_id = excluded.goal_id,
         position = excluded.position,
         role = excluded.role,
         status = excluded.status,
@@ -231,7 +229,7 @@ class ExplorationStore {
     `);
     this.deleteStaleMessages = this.database.prepare(`
       DELETE FROM messages
-      WHERE exploration_id = ? AND position >= ?
+      WHERE goal_id = ? AND position >= ?
     `);
   }
 
@@ -244,7 +242,7 @@ class ExplorationStore {
           working_directory AS workingDirectory,
           created_at AS createdAt,
           updated_at AS updatedAt
-        FROM explorations
+        FROM goals
         ORDER BY created_at DESC
       `)
       .all()
@@ -252,7 +250,7 @@ class ExplorationStore {
   }
 
   get(id) {
-    const exploration = this.database
+    const goal = this.database
       .prepare(`
         SELECT
           id,
@@ -261,12 +259,12 @@ class ExplorationStore {
           findings_markdown AS findingsMarkdown,
           created_at AS createdAt,
           updated_at AS updatedAt
-        FROM explorations
+        FROM goals
         WHERE id = ?
       `)
       .get(id);
 
-    if (!exploration) {
+    if (!goal) {
       return null;
     }
 
@@ -280,7 +278,7 @@ class ExplorationStore {
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM agent_sessions
-        WHERE exploration_id = ? AND is_active = 1
+        WHERE goal_id = ? AND is_active = 1
       `)
       .get(id);
     let agentSession = null;
@@ -296,7 +294,7 @@ class ExplorationStore {
       .prepare(`
         SELECT id, role, status, parts_json AS partsJson
         FROM messages
-        WHERE exploration_id = ?
+        WHERE goal_id = ?
         ORDER BY position
       `)
       .all(id)
@@ -306,14 +304,14 @@ class ExplorationStore {
       }));
 
     return {
-      ...exploration,
+      ...goal,
       agentSession,
       tasks: this.listTasks(id),
       messages,
     };
   }
 
-  listTasks(explorationId) {
+  listTasks(goalId) {
     return this.database
       .prepare(`
         SELECT
@@ -325,10 +323,10 @@ class ExplorationStore {
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM tasks
-        WHERE exploration_id = ?
+        WHERE goal_id = ?
         ORDER BY sequence
       `)
-      .all(explorationId)
+      .all(goalId)
       .map((row) => ({ ...row }));
   }
 
@@ -337,8 +335,8 @@ class ExplorationStore {
       .prepare(`
         SELECT
           t.id,
-          t.exploration_id AS explorationId,
-          e.title AS explorationTitle,
+          t.goal_id AS goalId,
+          e.title AS goalTitle,
           t.sequence,
           t.title,
           t.spec_markdown AS specMarkdown,
@@ -346,7 +344,7 @@ class ExplorationStore {
           t.created_at AS createdAt,
           t.updated_at AS updatedAt
         FROM tasks t
-        JOIN explorations e ON e.id = t.exploration_id
+        JOIN goals e ON e.id = t.goal_id
         WHERE t.status <> 'draft'
         ORDER BY t.created_at DESC
       `)
@@ -354,7 +352,7 @@ class ExplorationStore {
       .map((row) => ({ ...row }));
   }
 
-  commitTasks(explorationId) {
+  commitTasks(goalId) {
     const now = new Date().toISOString();
     this.database.exec('BEGIN IMMEDIATE');
 
@@ -363,17 +361,17 @@ class ExplorationStore {
         .prepare(`
           UPDATE tasks
           SET status = 'queued', updated_at = ?
-          WHERE exploration_id = ? AND status = 'draft'
+          WHERE goal_id = ? AND status = 'draft'
         `)
-        .run(now, explorationId);
+        .run(now, goalId);
 
       if (result.changes > 0) {
         this.database
-          .prepare('UPDATE explorations SET updated_at = ? WHERE id = ?')
-          .run(now, explorationId);
+          .prepare('UPDATE goals SET updated_at = ? WHERE id = ?')
+          .run(now, goalId);
       }
       this.database.exec('COMMIT');
-      return this.listTasks(explorationId);
+      return this.listTasks(goalId);
     } catch (error) {
       this.database.exec('ROLLBACK');
       throw error;
@@ -385,14 +383,14 @@ class ExplorationStore {
       .prepare(`
         SELECT
           t.id,
-          t.exploration_id AS explorationId,
+          t.goal_id AS goalId,
           t.title,
           t.spec_markdown AS specMarkdown,
           t.status,
           e.working_directory AS workingDirectory,
           e.findings_markdown AS findingsMarkdown
         FROM tasks t
-        JOIN explorations e ON e.id = t.exploration_id
+        JOIN goals e ON e.id = t.goal_id
         WHERE t.id = ?
       `)
       .get(taskId);
@@ -552,7 +550,7 @@ class ExplorationStore {
       .prepare(`
         SELECT
           w.task_id AS taskId,
-          t.exploration_id AS explorationId,
+          t.goal_id AS goalId,
           t.title,
           w.status,
           w.branch,
@@ -633,25 +631,25 @@ class ExplorationStore {
     }
   }
 
-  save(exploration) {
+  save(goal) {
     this.database.exec('BEGIN IMMEDIATE');
 
     try {
-      this.upsertExploration.run(
-        exploration.id,
-        exploration.title,
-        exploration.workingDirectory,
-        exploration.findingsMarkdown,
-        exploration.createdAt,
-        exploration.updatedAt,
+      this.upsertGoal.run(
+        goal.id,
+        goal.title,
+        goal.workingDirectory,
+        goal.findingsMarkdown,
+        goal.createdAt,
+        goal.updatedAt,
       );
 
-      if (exploration.agentSession) {
-        const session = exploration.agentSession;
-        this.deactivateSessions.run(exploration.id);
+      if (goal.agentSession) {
+        const session = goal.agentSession;
+        this.deactivateSessions.run(goal.id);
         this.upsertSession.run(
           session.id,
-          exploration.id,
+          goal.id,
           session.provider,
           session.externalId,
           JSON.stringify(session.metadata),
@@ -660,17 +658,17 @@ class ExplorationStore {
         );
       }
 
-      exploration.messages.forEach((message, position) => {
+      goal.messages.forEach((message, position) => {
         this.upsertMessage.run(
           message.id,
-          exploration.id,
+          goal.id,
           position,
           message.role,
           message.status,
           JSON.stringify(message.parts),
         );
       });
-      this.deleteStaleMessages.run(exploration.id, exploration.messages.length);
+      this.deleteStaleMessages.run(goal.id, goal.messages.length);
       this.database.exec('COMMIT');
     } catch (error) {
       this.database.exec('ROLLBACK');
@@ -683,4 +681,4 @@ class ExplorationStore {
   }
 }
 
-module.exports = { ExplorationStore };
+module.exports = { GoalStore };

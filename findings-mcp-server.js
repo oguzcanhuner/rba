@@ -13,35 +13,35 @@ const MAX_TASK_SPEC_LENGTH = 500_000;
 const TASK_STATUSES = new Set(['draft', 'queued']);
 
 class FindingsRepository {
-  constructor(filename, explorationId) {
+  constructor(filename, goalId) {
     if (!path.isAbsolute(filename)) {
-      throw new Error('The exploration database path must be absolute.');
+      throw new Error('The goal database path must be absolute.');
     }
     if (
-      typeof explorationId !== 'string' ||
-      explorationId.length === 0 ||
-      explorationId.length > 100
+      typeof goalId !== 'string' ||
+      goalId.length === 0 ||
+      goalId.length > 100
     ) {
-      throw new Error('The exploration ID is invalid.');
+      throw new Error('The goal ID is invalid.');
     }
 
-    this.explorationId = explorationId;
+    this.goalId = goalId;
     this.database = new DatabaseSync(filename);
     this.database.exec('PRAGMA busy_timeout = 5000');
     this.readStatement = this.database.prepare(`
       SELECT findings_markdown AS findingsMarkdown
-      FROM explorations
+      FROM goals
       WHERE id = ?
     `);
     this.updateStatement = this.database.prepare(`
-      UPDATE explorations
+      UPDATE goals
       SET findings_markdown = ?, updated_at = ?
       WHERE id = ?
     `);
   }
 
   read() {
-    return this.readStatement.get(this.explorationId)?.findingsMarkdown ?? null;
+    return this.readStatement.get(this.goalId)?.findingsMarkdown ?? null;
   }
 
   update(markdown) {
@@ -50,11 +50,8 @@ class FindingsRepository {
     }
 
     return (
-      this.updateStatement.run(
-        markdown,
-        new Date().toISOString(),
-        this.explorationId,
-      ).changes > 0
+      this.updateStatement.run(markdown, new Date().toISOString(), this.goalId)
+        .changes > 0
     );
   }
 
@@ -64,19 +61,19 @@ class FindingsRepository {
 }
 
 class TasksRepository {
-  constructor(filename, explorationId) {
+  constructor(filename, goalId) {
     if (!path.isAbsolute(filename)) {
-      throw new Error('The exploration database path must be absolute.');
+      throw new Error('The goal database path must be absolute.');
     }
     if (
-      typeof explorationId !== 'string' ||
-      explorationId.length === 0 ||
-      explorationId.length > 100
+      typeof goalId !== 'string' ||
+      goalId.length === 0 ||
+      goalId.length > 100
     ) {
-      throw new Error('The exploration ID is invalid.');
+      throw new Error('The goal ID is invalid.');
     }
 
-    this.explorationId = explorationId;
+    this.goalId = goalId;
     this.database = new DatabaseSync(filename);
     this.database.exec(`
       PRAGMA foreign_keys = ON;
@@ -96,10 +93,10 @@ class TasksRepository {
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM tasks
-        WHERE exploration_id = ?
+        WHERE goal_id = ?
         ORDER BY sequence
       `)
-      .all(this.explorationId)
+      .all(this.goalId)
       .map((row) => ({ ...row }));
   }
 
@@ -109,7 +106,7 @@ class TasksRepository {
 
     this.database.exec('BEGIN IMMEDIATE');
     try {
-      if (!this.explorationExists()) {
+      if (!this.goalExists()) {
         this.database.exec('ROLLBACK');
         return null;
       }
@@ -118,20 +115,20 @@ class TasksRepository {
         .prepare(`
           SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
           FROM tasks
-          WHERE exploration_id = ?
+          WHERE goal_id = ?
         `)
-        .get(this.explorationId);
+        .get(this.goalId);
       const id = randomUUID();
       const now = new Date().toISOString();
       this.database
         .prepare(`
           INSERT INTO tasks (
-            id, exploration_id, sequence, title, spec_markdown, status,
+            id, goal_id, sequence, title, spec_markdown, status,
             created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
         `)
-        .run(id, this.explorationId, sequence, title, specMarkdown, now, now);
-      this.touchExploration(now);
+        .run(id, this.goalId, sequence, title, specMarkdown, now, now);
+      this.touchGoal(now);
       this.database.exec('COMMIT');
       return this.get(id);
     } catch (error) {
@@ -166,10 +163,10 @@ class TasksRepository {
         .prepare(`
           UPDATE tasks
           SET title = ?, spec_markdown = ?, updated_at = ?
-          WHERE id = ? AND exploration_id = ?
+          WHERE id = ? AND goal_id = ?
         `)
-        .run(title, specMarkdown, now, id, this.explorationId);
-      this.touchExploration(now);
+        .run(title, specMarkdown, now, id, this.goalId);
+      this.touchGoal(now);
       this.database.exec('COMMIT');
       return this.get(id);
     } catch (error) {
@@ -186,11 +183,11 @@ class TasksRepository {
       const result = this.database
         .prepare(`
           DELETE FROM tasks
-          WHERE id = ? AND exploration_id = ? AND status IN ('draft', 'queued')
+          WHERE id = ? AND goal_id = ? AND status IN ('draft', 'queued')
         `)
-        .run(id, this.explorationId);
+        .run(id, this.goalId);
       if (result.changes > 0) {
-        this.touchExploration(now);
+        this.touchGoal(now);
       }
       this.database.exec('COMMIT');
       return result.changes > 0;
@@ -208,11 +205,11 @@ class TasksRepository {
         .prepare(`
           UPDATE tasks
           SET status = 'queued', updated_at = ?
-          WHERE exploration_id = ? AND status = 'draft'
+          WHERE goal_id = ? AND status = 'draft'
         `)
-        .run(now, this.explorationId);
+        .run(now, this.goalId);
       if (result.changes > 0) {
-        this.touchExploration(now);
+        this.touchGoal(now);
       }
       this.database.exec('COMMIT');
       return result.changes;
@@ -235,24 +232,24 @@ class TasksRepository {
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM tasks
-        WHERE id = ? AND exploration_id = ?
+        WHERE id = ? AND goal_id = ?
       `)
-      .get(id, this.explorationId);
+      .get(id, this.goalId);
     return row ? { ...row } : null;
   }
 
-  explorationExists() {
+  goalExists() {
     return Boolean(
       this.database
-        .prepare('SELECT 1 FROM explorations WHERE id = ?')
-        .get(this.explorationId),
+        .prepare('SELECT 1 FROM goals WHERE id = ?')
+        .get(this.goalId),
     );
   }
 
-  touchExploration(now) {
+  touchGoal(now) {
     this.database
-      .prepare('UPDATE explorations SET updated_at = ? WHERE id = ?')
-      .run(now, this.explorationId);
+      .prepare('UPDATE goals SET updated_at = ? WHERE id = ?')
+      .run(now, this.goalId);
   }
 
   validateId(id) {
@@ -285,9 +282,9 @@ class TasksRepository {
   }
 }
 
-async function startServer({ databasePath, explorationId }) {
-  const repository = new FindingsRepository(databasePath, explorationId);
-  const tasks = new TasksRepository(databasePath, explorationId);
+async function startServer({ databasePath, goalId }) {
+  const repository = new FindingsRepository(databasePath, goalId);
+  const tasks = new TasksRepository(databasePath, goalId);
   const server = new McpServer({ name: 'rba-findings', version: '1.0.0' });
 
   server.registerTool(
@@ -295,7 +292,7 @@ async function startServer({ databasePath, explorationId }) {
     {
       title: 'Read findings',
       description:
-        "Read the active exploration's current findings Markdown before revising it.",
+        "Read the active goal's current findings Markdown before revising it.",
       annotations: { readOnlyHint: true },
     },
     async () => ({
@@ -313,7 +310,7 @@ async function startServer({ databasePath, explorationId }) {
     {
       title: 'Read tasks',
       description:
-        "Read the active exploration's current task drafts and queued tasks before revising them.",
+        "Read the active goal's current task drafts and queued tasks before revising them.",
       annotations: { readOnlyHint: true },
     },
     async () => {
@@ -337,7 +334,7 @@ async function startServer({ databasePath, explorationId }) {
     {
       title: 'Add task',
       description:
-        'Add a durable draft task to the active exploration. The draft appears immediately for user review.',
+        'Add a durable draft task to the active goal. The draft appears immediately for user review.',
       inputSchema: {
         title: z
           .string()
@@ -355,9 +352,7 @@ async function startServer({ databasePath, explorationId }) {
       const task = tasks.add({ title, specMarkdown });
       if (!task) {
         return {
-          content: [
-            { type: 'text', text: 'The exploration no longer exists.' },
-          ],
+          content: [{ type: 'text', text: 'The goal no longer exists.' }],
           isError: true,
         };
       }
@@ -414,7 +409,7 @@ async function startServer({ databasePath, explorationId }) {
     {
       title: 'Remove task',
       description:
-        'Remove a draft or queued task from the active exploration. Read tasks first.',
+        'Remove a draft or queued task from the active goal. Read tasks first.',
       inputSchema: {
         id: z.string().min(1).max(100).describe('The stable task ID'),
       },
@@ -434,7 +429,7 @@ async function startServer({ databasePath, explorationId }) {
     {
       title: 'Commit tasks',
       description:
-        "Promote all of the active exploration's draft tasks to queued after the user confirms the breakdown.",
+        "Promote all of the active goal's draft tasks to queued after the user confirms the breakdown.",
       annotations: { destructiveHint: true, idempotentHint: true },
     },
     async () => {
@@ -450,7 +445,7 @@ async function startServer({ databasePath, explorationId }) {
     {
       title: 'Update findings',
       description:
-        "Replace the active exploration's findings with the complete revised Markdown document.",
+        "Replace the active goal's findings with the complete revised Markdown document.",
       inputSchema: {
         markdown: z
           .string()
@@ -462,9 +457,7 @@ async function startServer({ databasePath, explorationId }) {
     async ({ markdown }) => {
       if (!repository.update(markdown)) {
         return {
-          content: [
-            { type: 'text', text: 'The exploration no longer exists.' },
-          ],
+          content: [{ type: 'text', text: 'The goal no longer exists.' }],
           isError: true,
         };
       }
@@ -488,8 +481,8 @@ async function startServer({ databasePath, explorationId }) {
 
 if (require.main === module) {
   startServer({
-    databasePath: process.env.RBA_EXPLORATION_DATABASE,
-    explorationId: process.env.RBA_EXPLORATION_ID,
+    databasePath: process.env.RBA_GOAL_DATABASE,
+    goalId: process.env.RBA_GOAL_ID,
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

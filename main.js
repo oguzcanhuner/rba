@@ -3,12 +3,12 @@ const { realpath, stat } = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
-const { ExplorationStore } = require('./exploration-store');
+const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
 
 const activeRequests = new Map();
-let explorationStore;
-let explorationDatabase;
+let goalStore;
+let goalDatabase;
 let workerService;
 
 function sendClaudeEvent(webContents, payload) {
@@ -48,9 +48,9 @@ function isValidStartRequest(request) {
     request &&
       typeof request.requestId === 'string' &&
       request.requestId.length <= 100 &&
-      typeof request.explorationId === 'string' &&
-      request.explorationId.length > 0 &&
-      request.explorationId.length <= 100 &&
+      typeof request.goalId === 'string' &&
+      request.goalId.length > 0 &&
+      request.goalId.length <= 100 &&
       typeof request.prompt === 'string' &&
       request.prompt.trim().length > 0 &&
       request.prompt.length <= 100_000 &&
@@ -65,43 +65,43 @@ function isValidStartRequest(request) {
   );
 }
 
-function isValidExploration(exploration) {
+function isValidGoal(goal) {
   const validSession =
-    exploration?.agentSession === null ||
-    (exploration?.agentSession &&
-      typeof exploration.agentSession.id === 'string' &&
-      typeof exploration.agentSession.provider === 'string' &&
-      exploration.agentSession.provider.length > 0 &&
-      exploration.agentSession.provider.length <= 100 &&
-      typeof exploration.agentSession.externalId === 'string' &&
-      exploration.agentSession.externalId.length > 0 &&
-      exploration.agentSession.externalId.length <= 500 &&
-      exploration.agentSession.metadata &&
-      typeof exploration.agentSession.metadata === 'object' &&
-      typeof exploration.agentSession.createdAt === 'string' &&
-      typeof exploration.agentSession.updatedAt === 'string');
+    goal?.agentSession === null ||
+    (goal?.agentSession &&
+      typeof goal.agentSession.id === 'string' &&
+      typeof goal.agentSession.provider === 'string' &&
+      goal.agentSession.provider.length > 0 &&
+      goal.agentSession.provider.length <= 100 &&
+      typeof goal.agentSession.externalId === 'string' &&
+      goal.agentSession.externalId.length > 0 &&
+      goal.agentSession.externalId.length <= 500 &&
+      goal.agentSession.metadata &&
+      typeof goal.agentSession.metadata === 'object' &&
+      typeof goal.agentSession.createdAt === 'string' &&
+      typeof goal.agentSession.updatedAt === 'string');
 
   return Boolean(
-    exploration &&
-      typeof exploration.id === 'string' &&
-      exploration.id.length > 0 &&
-      exploration.id.length <= 100 &&
-      typeof exploration.title === 'string' &&
-      exploration.title.length > 0 &&
-      exploration.title.length <= 200 &&
-      typeof exploration.workingDirectory === 'string' &&
-      exploration.workingDirectory.length > 0 &&
-      exploration.workingDirectory.length <= 4096 &&
-      path.isAbsolute(exploration.workingDirectory) &&
-      typeof exploration.createdAt === 'string' &&
-      typeof exploration.updatedAt === 'string' &&
-      (exploration.findingsMarkdown === null ||
-        (typeof exploration.findingsMarkdown === 'string' &&
-          exploration.findingsMarkdown.length <= 500_000)) &&
+    goal &&
+      typeof goal.id === 'string' &&
+      goal.id.length > 0 &&
+      goal.id.length <= 100 &&
+      typeof goal.title === 'string' &&
+      goal.title.length > 0 &&
+      goal.title.length <= 200 &&
+      typeof goal.workingDirectory === 'string' &&
+      goal.workingDirectory.length > 0 &&
+      goal.workingDirectory.length <= 4096 &&
+      path.isAbsolute(goal.workingDirectory) &&
+      typeof goal.createdAt === 'string' &&
+      typeof goal.updatedAt === 'string' &&
+      (goal.findingsMarkdown === null ||
+        (typeof goal.findingsMarkdown === 'string' &&
+          goal.findingsMarkdown.length <= 500_000)) &&
       validSession &&
-      Array.isArray(exploration.tasks) &&
-      exploration.tasks.length <= 1_000 &&
-      exploration.tasks.every(
+      Array.isArray(goal.tasks) &&
+      goal.tasks.length <= 1_000 &&
+      goal.tasks.every(
         (task) =>
           task &&
           typeof task.id === 'string' &&
@@ -125,9 +125,9 @@ function isValidExploration(exploration) {
           typeof task.createdAt === 'string' &&
           typeof task.updatedAt === 'string',
       ) &&
-      Array.isArray(exploration.messages) &&
-      exploration.messages.length <= 10_000 &&
-      exploration.messages.every(
+      Array.isArray(goal.messages) &&
+      goal.messages.length <= 10_000 &&
+      goal.messages.every(
         (message) =>
           message &&
           typeof message.id === 'string' &&
@@ -242,8 +242,8 @@ async function startClaudeRequest(event, request) {
       prompt: request.prompt,
       sessionId: request.sessionId,
       cwd,
-      explorationDatabase,
-      explorationId: request.explorationId,
+      goalDatabase,
+      goalId: request.goalId,
       findingsServer: {
         command: process.execPath,
         script: path.join(__dirname, 'findings-mcp-server.js'),
@@ -309,7 +309,7 @@ async function startClaudeRequest(event, request) {
           sendClaudeEvent(event.sender, {
             type: 'tasks-updated',
             requestId: request.requestId,
-            tasks: explorationStore.listTasks(request.explorationId),
+            tasks: goalStore.listTasks(request.goalId),
           });
         }
         pendingFindings.delete(tool.id);
@@ -390,45 +390,45 @@ ipcMain.handle('claude:pick-directory', async (event) => {
   return result.canceled ? null : validatedDirectory(result.filePaths[0]);
 });
 
-ipcMain.handle('explorations:list', (event) => {
+ipcMain.handle('goals:list', (event) => {
   if (!isTrustedSender(event.senderFrame)) {
-    throw new Error('Untrusted exploration request.');
+    throw new Error('Untrusted goal request.');
   }
 
-  return explorationStore.list();
+  return goalStore.list();
 });
 
-ipcMain.handle('explorations:get', (event, id) => {
+ipcMain.handle('goals:get', (event, id) => {
   if (
     !isTrustedSender(event.senderFrame) ||
     typeof id !== 'string' ||
     id.length > 100
   ) {
-    throw new Error('Invalid exploration request.');
+    throw new Error('Invalid goal request.');
   }
 
-  return explorationStore.get(id);
+  return goalStore.get(id);
 });
 
-ipcMain.handle('explorations:save', (event, exploration) => {
-  if (!isTrustedSender(event.senderFrame) || !isValidExploration(exploration)) {
-    throw new Error('Invalid exploration.');
+ipcMain.handle('goals:save', (event, goal) => {
+  if (!isTrustedSender(event.senderFrame) || !isValidGoal(goal)) {
+    throw new Error('Invalid goal.');
   }
 
-  explorationStore.save(exploration);
+  goalStore.save(goal);
 });
 
-ipcMain.handle('explorations:commit-tasks', (event, explorationId) => {
+ipcMain.handle('goals:commit-tasks', (event, goalId) => {
   if (
     !isTrustedSender(event.senderFrame) ||
-    typeof explorationId !== 'string' ||
-    explorationId.length === 0 ||
-    explorationId.length > 100
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100
   ) {
     throw new Error('Invalid task commit request.');
   }
 
-  return explorationStore.commitTasks(explorationId);
+  return goalStore.commitTasks(goalId);
 });
 
 ipcMain.handle('tasks:list', (event) => {
@@ -436,7 +436,7 @@ ipcMain.handle('tasks:list', (event) => {
     throw new Error('Untrusted task request.');
   }
 
-  return explorationStore.listCommittedTasks();
+  return goalStore.listCommittedTasks();
 });
 
 ipcMain.handle('workers:get', (event, taskId) => {
@@ -448,7 +448,7 @@ ipcMain.handle('workers:get', (event, taskId) => {
   ) {
     throw new Error('Invalid worker request.');
   }
-  return explorationStore.getWorkerRun(taskId);
+  return goalStore.getWorkerRun(taskId);
 });
 
 ipcMain.handle('workers:start', async (event, taskId) => {
@@ -530,14 +530,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  explorationDatabase = path.join(
-    app.getPath('userData'),
-    'explorations.sqlite3',
-  );
-  explorationStore = new ExplorationStore(explorationDatabase);
-  explorationStore.interruptWorkingRuns();
+  goalDatabase = path.join(app.getPath('userData'), 'goals.sqlite3');
+  goalStore = new GoalStore(goalDatabase);
+  goalStore.interruptWorkingRuns();
   workerService = new WorkerService({
-    store: explorationStore,
+    store: goalStore,
     worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
     onUpdate: broadcastWorker,
   });
@@ -552,7 +549,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   workerService?.shutdown();
-  explorationStore?.close();
+  goalStore?.close();
 });
 
 app.on('window-all-closed', () => {

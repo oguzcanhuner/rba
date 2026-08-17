@@ -1,13 +1,13 @@
 const assert = require('node:assert/strict');
 const { setImmediate: waitForImmediate } = require('node:timers/promises');
 const { test } = require('node:test');
-const { ExplorationStore } = require('../exploration-store');
+const { GoalStore } = require('../goal-store');
 const { WorkerService } = require('../worker-service');
 
 function storeWithQueuedTask() {
-  const store = new ExplorationStore(':memory:');
+  const store = new GoalStore(':memory:');
   store.save({
-    id: 'exploration-1',
+    id: 'goal-1',
     title: 'Build workers',
     workingDirectory: '/repo',
     agentSession: null,
@@ -20,13 +20,13 @@ function storeWithQueuedTask() {
   store.database
     .prepare(`
       INSERT INTO tasks (
-        id, exploration_id, sequence, title, spec_markdown, status,
+        id, goal_id, sequence, title, spec_markdown, status,
         created_at, updated_at
       ) VALUES (?, ?, 1, ?, ?, 'queued', ?, ?)
     `)
     .run(
       'task-1',
-      'exploration-1',
+      'goal-1',
       'Implement the worker',
       'Add the minimal worker.',
       '2026-08-09T10:01:00.000Z',

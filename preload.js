@@ -13,12 +13,11 @@ contextBridge.exposeInMainWorld('claude', {
   },
 });
 
-contextBridge.exposeInMainWorld('explorations', {
-  list: () => ipcRenderer.invoke('explorations:list'),
-  get: (id) => ipcRenderer.invoke('explorations:get', id),
-  save: (exploration) => ipcRenderer.invoke('explorations:save', exploration),
-  commitTasks: (explorationId) =>
-    ipcRenderer.invoke('explorations:commit-tasks', explorationId),
+contextBridge.exposeInMainWorld('goals', {
+  list: () => ipcRenderer.invoke('goals:list'),
+  get: (id) => ipcRenderer.invoke('goals:get', id),
+  save: (goal) => ipcRenderer.invoke('goals:save', goal),
+  commitTasks: (goalId) => ipcRenderer.invoke('goals:commit-tasks', goalId),
 });
 
 contextBridge.exposeInMainWorld('tasks', {

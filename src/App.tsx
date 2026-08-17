@@ -14,8 +14,8 @@ import type {
   ClaudeStreamEvent,
   DisplayMessage,
   DisplayPart,
-  Exploration,
-  ExplorationSummary,
+  Goal,
+  GoalSummary,
   SidebarTask,
   Task,
   ToolStatus,
@@ -170,29 +170,29 @@ function finishTools(parts: DisplayPart[], status: ToolStatus) {
   );
 }
 
-function explorationTitle(message: string) {
+function goalTitle(message: string) {
   const title = message.replace(/\s+/g, ' ').trim();
   return title.length <= 60 ? title : `${title.slice(0, 57).trimEnd()}…`;
 }
 
-function summaryOf(exploration: Exploration): ExplorationSummary {
+function summaryOf(goal: Goal): GoalSummary {
   const {
     agentSession: _agentSession,
     findingsMarkdown: _findingsMarkdown,
     messages: _messages,
     ...summary
-  } = exploration;
+  } = goal;
   return summary;
 }
 
-function byNewestCreation(left: ExplorationSummary, right: ExplorationSummary) {
+function byNewestCreation(left: GoalSummary, right: GoalSummary) {
   return right.createdAt.localeCompare(left.createdAt);
 }
 
-function restoreInterruptedMessages(exploration: Exploration): Exploration {
+function restoreInterruptedMessages(goal: Goal): Goal {
   return {
-    ...exploration,
-    messages: exploration.messages.map((message) =>
+    ...goal,
+    messages: goal.messages.map((message) =>
       message.status === 'streaming'
         ? {
             ...message,
@@ -205,14 +205,14 @@ function restoreInterruptedMessages(exploration: Exploration): Exploration {
 }
 
 function updateAssistant(
-  exploration: Exploration,
+  goal: Goal,
   requestId: string,
   update: (message: DisplayMessage) => DisplayMessage,
 ) {
   return {
-    ...exploration,
+    ...goal,
     updatedAt: new Date().toISOString(),
-    messages: exploration.messages.map((message) =>
+    messages: goal.messages.map((message) =>
       message.id === `assistant-${requestId}` ? update(message) : message,
     ),
   };
@@ -220,14 +220,13 @@ function updateAssistant(
 
 export function App() {
   const workspaceLayout = useDefaultLayout({
-    id: 'rba.exploration-workspace',
+    id: 'rba.goal-workspace',
     panelIds: ['findings', 'chat'],
     storage: window.localStorage,
   });
-  const [explorations, setExplorations] = useState<ExplorationSummary[]>([]);
+  const [goals, setGoals] = useState<GoalSummary[]>([]);
   const [sidebarTasks, setSidebarTasks] = useState<SidebarTask[]>([]);
-  const [activeExploration, setActiveExploration] =
-    useState<Exploration | null>(null);
+  const [activeGoal, setActiveGoal] = useState<Goal | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
@@ -241,12 +240,12 @@ export function App() {
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesContainer = useRef<HTMLElement>(null);
-  const startExplorationRequestRef = useRef<
-    (content: string, cwd: string) => void
-  >(() => {});
+  const startGoalRequestRef = useRef<(content: string, cwd: string) => void>(
+    () => {},
+  );
   const shouldFollowMessages = useRef(true);
-  const previousExplorationId = useRef<string | null>(null);
-  const messages = activeExploration?.messages ?? [];
+  const previousGoalId = useRef<string | null>(null);
+  const messages = activeGoal?.messages ?? [];
 
   const refreshSidebarTasks = useCallback(async () => {
     try {
@@ -261,23 +260,23 @@ export function App() {
 
     Promise.all([
       window.claude.getDefaultDirectory(),
-      window.explorations.list(),
+      window.goals.list(),
       window.tasks.list(),
     ])
-      .then(async ([defaultDirectory, savedExplorations, savedTasks]) => {
+      .then(async ([defaultDirectory, savedGoals, savedTasks]) => {
         if (disposed) {
           return;
         }
 
-        setExplorations(savedExplorations);
+        setGoals(savedGoals);
         setSidebarTasks(savedTasks);
-        const latest = savedExplorations[0];
+        const latest = savedGoals[0];
 
         if (latest) {
-          const saved = await window.explorations.get(latest.id);
+          const saved = await window.goals.get(latest.id);
           if (!disposed && saved) {
             const restored = restoreInterruptedMessages(saved);
-            setActiveExploration(restored);
+            setActiveGoal(restored);
             setWorkingDirectory(restored.workingDirectory);
           }
         } else {
@@ -286,7 +285,7 @@ export function App() {
       })
       .catch(() => {
         if (!disposed) {
-          setError('Saved explorations could not be loaded.');
+          setError('Saved goals could not be loaded.');
         }
       });
 
@@ -296,33 +295,33 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeExploration) {
+    if (!activeGoal) {
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      window.explorations
-        .save(activeExploration)
+      window.goals
+        .save(activeGoal)
         .then(() => {
-          const summary = summaryOf(activeExploration);
-          setExplorations((current) =>
+          const summary = summaryOf(activeGoal);
+          setGoals((current) =>
             [summary, ...current.filter((item) => item.id !== summary.id)].sort(
               byNewestCreation,
             ),
           );
         })
         .catch(() => {
-          setError('This exploration could not be saved.');
+          setError('This goal could not be saved.');
         });
     }, 150);
 
     return () => window.clearTimeout(timeout);
-  }, [activeExploration]);
+  }, [activeGoal]);
 
   useEffect(() => {
     const handleEvent = (event: ClaudeStreamEvent) => {
       if (event.type === 'findings-updated') {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? {
                 ...current,
@@ -336,7 +335,7 @@ export function App() {
 
       if (event.type === 'tasks-updated') {
         void refreshSidebarTasks();
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? {
                 ...current,
@@ -349,7 +348,7 @@ export function App() {
       }
 
       if (event.type === 'text-delta') {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? updateAssistant(current, event.requestId, (message) => ({
                 ...message,
@@ -361,7 +360,7 @@ export function App() {
       }
 
       if (event.type === 'tool-start') {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? updateAssistant(current, event.requestId, (message) => ({
                 ...message,
@@ -384,7 +383,7 @@ export function App() {
       }
 
       if (event.type === 'tool-input') {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? updateAssistant(current, event.requestId, (message) => ({
                 ...message,
@@ -403,7 +402,7 @@ export function App() {
       }
 
       if (event.type === 'tool-result') {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? updateAssistant(current, event.requestId, (message) => ({
                 ...message,
@@ -425,7 +424,7 @@ export function App() {
       }
 
       if (event.type === 'complete') {
-        setActiveExploration((current) => {
+        setActiveGoal((current) => {
           if (!current) {
             return current;
           }
@@ -458,7 +457,7 @@ export function App() {
           };
         });
       } else if (event.type === 'cancelled') {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? updateAssistant(current, event.requestId, (message) => ({
                 ...message,
@@ -468,7 +467,7 @@ export function App() {
             : current,
         );
       } else {
-        setActiveExploration((current) =>
+        setActiveGoal((current) =>
           current
             ? updateAssistant(current, event.requestId, (message) => ({
                 ...message,
@@ -495,8 +494,8 @@ export function App() {
     () =>
       window.workers.onEvent((event) => {
         const { run } = event;
-        setActiveExploration((current) =>
-          current?.id === run.explorationId
+        setActiveGoal((current) =>
+          current?.id === run.goalId
             ? {
                 ...current,
                 tasks: current.tasks.map((task) =>
@@ -535,7 +534,7 @@ export function App() {
 
     const [next, ...rest] = queuedMessages;
     setQueuedMessages(rest);
-    startExplorationRequestRef.current(next.text, workingDirectory);
+    startGoalRequestRef.current(next.text, workingDirectory);
   }, [activeRequestId, queuedMessages, workingDirectory]);
 
   useEffect(() => {
@@ -565,9 +564,9 @@ export function App() {
   }, [activeWorker]);
 
   useEffect(() => {
-    const explorationId = activeExploration?.id ?? null;
-    if (explorationId !== previousExplorationId.current) {
-      previousExplorationId.current = explorationId;
+    const goalId = activeGoal?.id ?? null;
+    if (goalId !== previousGoalId.current) {
+      previousGoalId.current = goalId;
       shouldFollowMessages.current = true;
     }
 
@@ -575,9 +574,9 @@ export function App() {
     if (messages.length > 0 && container && shouldFollowMessages.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [activeExploration?.id, messages]);
+  }, [activeGoal?.id, messages]);
 
-  async function startExplorationRequest(content: string, cwd: string) {
+  async function startGoalRequest(content: string, cwd: string) {
     const requestId = crypto.randomUUID();
     const now = new Date().toISOString();
     const userMessage: DisplayMessage = {
@@ -592,19 +591,15 @@ export function App() {
       status: 'streaming',
       parts: [],
     };
-    const exploration: Exploration = activeExploration
+    const goal: Goal = activeGoal
       ? {
-          ...activeExploration,
+          ...activeGoal,
           updatedAt: now,
-          messages: [
-            ...activeExploration.messages,
-            userMessage,
-            assistantMessage,
-          ],
+          messages: [...activeGoal.messages, userMessage, assistantMessage],
         }
       : {
           id: crypto.randomUUID(),
-          title: explorationTitle(content),
+          title: goalTitle(content),
           workingDirectory: cwd,
           agentSession: null,
           findingsMarkdown: null,
@@ -614,22 +609,22 @@ export function App() {
           updatedAt: now,
         };
 
-    setActiveExploration(exploration);
+    setActiveGoal(goal);
     setActiveRequestId(requestId);
     try {
-      await window.explorations.save(exploration);
+      await window.goals.save(goal);
       window.claude.start({
         requestId,
-        explorationId: exploration.id,
+        goalId: goal.id,
         prompt: content,
         cwd,
-        ...(exploration.agentSession?.provider === 'claude'
-          ? { sessionId: exploration.agentSession.externalId }
+        ...(goal.agentSession?.provider === 'claude'
+          ? { sessionId: goal.agentSession.externalId }
           : {}),
       });
     } catch {
       setActiveRequestId(null);
-      setActiveExploration((current) =>
+      setActiveGoal((current) =>
         current
           ? updateAssistant(current, requestId, (message) => ({
               ...message,
@@ -637,7 +632,7 @@ export function App() {
             }))
           : current,
       );
-      setError('This exploration could not be saved.');
+      setError('This goal could not be saved.');
     }
   }
 
@@ -662,16 +657,16 @@ export function App() {
       return;
     }
 
-    void startExplorationRequest(content, workingDirectory);
+    void startGoalRequest(content, workingDirectory);
   }
 
-  startExplorationRequestRef.current = (content, cwd) => {
-    void startExplorationRequest(content, cwd);
+  startGoalRequestRef.current = (content, cwd) => {
+    void startGoalRequest(content, cwd);
   };
 
-  async function persistCurrentExploration() {
-    if (activeExploration) {
-      await window.explorations.save(activeExploration);
+  async function persistCurrentGoal() {
+    if (activeGoal) {
+      await window.goals.save(activeGoal);
     }
   }
 
@@ -680,9 +675,9 @@ export function App() {
       const directory = await window.claude.pickDirectory();
 
       if (directory && directory !== workingDirectory) {
-        await persistCurrentExploration();
+        await persistCurrentGoal();
         setWorkingDirectory(directory);
-        setActiveExploration(null);
+        setActiveGoal(null);
         setActiveWorker(null);
         setActiveTask(null);
         setDraft('');
@@ -693,18 +688,18 @@ export function App() {
     }
   }
 
-  async function selectExploration(id: string) {
-    if (activeRequestId || id === activeExploration?.id) {
+  async function selectGoal(id: string) {
+    if (activeRequestId || id === activeGoal?.id) {
       return;
     }
 
     try {
-      await persistCurrentExploration();
-      const exploration = await window.explorations.get(id);
+      await persistCurrentGoal();
+      const goal = await window.goals.get(id);
 
-      if (exploration) {
-        const restored = restoreInterruptedMessages(exploration);
-        setActiveExploration(restored);
+      if (goal) {
+        const restored = restoreInterruptedMessages(goal);
+        setActiveGoal(restored);
         setWorkingDirectory(restored.workingDirectory);
         setActiveWorker(null);
         setActiveTask(null);
@@ -712,24 +707,24 @@ export function App() {
         setError(null);
       }
     } catch {
-      setError('This exploration could not be loaded.');
+      setError('This goal could not be loaded.');
     }
   }
 
-  async function startNewExploration() {
+  async function startNewGoal() {
     if (activeRequestId) {
       return;
     }
 
     try {
-      await persistCurrentExploration();
-      setActiveExploration(null);
+      await persistCurrentGoal();
+      setActiveGoal(null);
       setActiveWorker(null);
       setActiveTask(null);
       setDraft('');
       setError(null);
     } catch {
-      setError('This exploration could not be saved.');
+      setError('This goal could not be saved.');
     }
   }
 
@@ -751,15 +746,13 @@ export function App() {
   }
 
   async function commitTasks() {
-    if (!activeExploration || activeRequestId) {
+    if (!activeGoal || activeRequestId) {
       return;
     }
 
     try {
-      const tasks: Task[] = await window.explorations.commitTasks(
-        activeExploration.id,
-      );
-      setActiveExploration((current) =>
+      const tasks: Task[] = await window.goals.commitTasks(activeGoal.id);
+      setActiveGoal((current) =>
         current
           ? { ...current, tasks, updatedAt: new Date().toISOString() }
           : current,
@@ -775,7 +768,7 @@ export function App() {
     setError(null);
     try {
       const run = await window.workers.start(task.id);
-      setActiveExploration((current) =>
+      setActiveGoal((current) =>
         current
           ? {
               ...current,
@@ -860,24 +853,24 @@ export function App() {
     >
       {!activeTask && (
         <aside
-          className="exploration-sidebar"
-          id="exploration-sidebar"
-          aria-label="Explorations and tasks"
+          className="goal-sidebar"
+          id="goal-sidebar"
+          aria-label="Goals and tasks"
         >
-          <div className="exploration-sidebar__header">
-            {!isSidebarCollapsed && <span>Explorations</span>}
-            <div className="exploration-sidebar__actions">
+          <div className="goal-sidebar__header">
+            {!isSidebarCollapsed && <span>Goals</span>}
+            <div className="goal-sidebar__actions">
               {!isSidebarCollapsed && (
                 <Button
                   type="button"
                   size="icon-sm"
                   disabled={activeRequestId !== null}
-                  aria-label="New exploration"
-                  title="New exploration"
-                  onClick={startNewExploration}
+                  aria-label="New goal"
+                  title="New goal"
+                  onClick={startNewGoal}
                 >
                   <img
-                    className="exploration-sidebar__new-icon"
+                    className="goal-sidebar__new-icon"
                     src={plusIcon}
                     alt=""
                     aria-hidden="true"
@@ -888,14 +881,14 @@ export function App() {
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-controls="exploration-sidebar"
+                aria-controls="goal-sidebar"
                 aria-expanded={!isSidebarCollapsed}
-                aria-label={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
-                title={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} explorations sidebar`}
+                aria-label={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} goals sidebar`}
+                title={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} goals sidebar`}
                 onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
               >
                 <img
-                  className={`exploration-sidebar__toggle-icon${isSidebarCollapsed ? ' exploration-sidebar__toggle-icon--expand' : ''}`}
+                  className={`goal-sidebar__toggle-icon${isSidebarCollapsed ? ' goal-sidebar__toggle-icon--expand' : ''}`}
                   src={sidebarCollapseIcon}
                   alt=""
                   aria-hidden="true"
@@ -905,26 +898,24 @@ export function App() {
           </div>
           {!isSidebarCollapsed && (
             <div className="sidebar-content">
-              <nav className="exploration-list" aria-label="Explorations">
-                {explorations.length === 0 ? (
-                  <p className="exploration-list__empty">No explorations yet</p>
+              <nav className="goal-list" aria-label="Goals">
+                {goals.length === 0 ? (
+                  <p className="goal-list__empty">No goals yet</p>
                 ) : (
-                  explorations.map((exploration) => (
+                  goals.map((goal) => (
                     <Button
-                      className="exploration-list__item"
+                      className="goal-list__item"
                       type="button"
                       variant="ghost"
-                      key={exploration.id}
+                      key={goal.id}
                       disabled={activeRequestId !== null}
                       aria-current={
-                        exploration.id === activeExploration?.id
-                          ? 'page'
-                          : undefined
+                        goal.id === activeGoal?.id ? 'page' : undefined
                       }
-                      title={exploration.title}
-                      onClick={() => selectExploration(exploration.id)}
+                      title={goal.title}
+                      onClick={() => selectGoal(goal.id)}
                     >
-                      {exploration.title}
+                      {goal.title}
                     </Button>
                   ))
                 )}
@@ -935,7 +926,7 @@ export function App() {
               >
                 <h2 id="sidebar-tasks-heading">Tasks</h2>
                 {sidebarTasks.length === 0 ? (
-                  <p className="exploration-list__empty">No queued tasks yet</p>
+                  <p className="goal-list__empty">No queued tasks yet</p>
                 ) : (
                   <div className="sidebar-task-list">
                     {sidebarTasks.map((task) => (
@@ -955,8 +946,8 @@ export function App() {
                         >
                           {task.status}
                         </span>
-                        <span className="sidebar-task__exploration">
-                          {task.explorationTitle}
+                        <span className="sidebar-task__goal">
+                          {task.goalTitle}
                         </span>
                       </Button>
                     ))}
@@ -988,22 +979,22 @@ export function App() {
         <ResizablePanelGroup
           className="workspace"
           defaultLayout={workspaceLayout.defaultLayout}
-          id="rba.exploration-workspace"
+          id="rba.goal-workspace"
           onLayoutChanged={workspaceLayout.onLayoutChanged}
           orientation="horizontal"
         >
           <ResizablePanel defaultSize={55} id="findings" minSize={30}>
-            <aside className="findings" aria-label="Exploration findings">
+            <aside className="findings" aria-label="Goal findings">
               <header className="findings__header">
                 <h2>Findings</h2>
               </header>
               <div className="findings__content" aria-live="polite">
                 <div
-                  className={`findings__document${activeExploration?.findingsMarkdown ? '' : ' findings__document--empty'}`}
+                  className={`findings__document${activeGoal?.findingsMarkdown ? '' : ' findings__document--empty'}`}
                 >
-                  {activeExploration?.findingsMarkdown ? (
+                  {activeGoal?.findingsMarkdown ? (
                     <MarkdownContent className="typeset-findings">
-                      {activeExploration.findingsMarkdown}
+                      {activeGoal.findingsMarkdown}
                     </MarkdownContent>
                   ) : (
                     <div className="findings-empty">
@@ -1016,26 +1007,26 @@ export function App() {
                       <div className="findings-empty__copy">
                         <h3>Findings will take shape here</h3>
                         <p>
-                          As you explore, key insights and decisions will be
-                          gathered into a clear, evolving summary.
+                          As the goal takes shape, key insights and decisions
+                          will be gathered into a clear, evolving summary.
                         </p>
                       </div>
                     </div>
                   )}
                 </div>
-                {activeExploration && (
+                {activeGoal && (
                   <TaskList
-                    tasks={activeExploration.tasks}
+                    tasks={activeGoal.tasks}
                     commitDisabled={
                       activeRequestId !== null || startingTaskId !== null
                     }
                     onCommit={commitTasks}
                     onOpenTask={(task) => {
-                      if (activeExploration) {
+                      if (activeGoal) {
                         void openTask({
                           ...task,
-                          explorationId: activeExploration.id,
-                          explorationTitle: activeExploration.title,
+                          goalId: activeGoal.id,
+                          goalTitle: activeGoal.title,
                         });
                       }
                     }}
@@ -1048,7 +1039,7 @@ export function App() {
           <ResizablePanel defaultSize={45} id="chat" minSize={30}>
             <section className="chat">
               <header className="chat__header">
-                <h1>{activeExploration?.title ?? 'RBA'}</h1>
+                <h1>{activeGoal?.title ?? 'RBA'}</h1>
                 <span>Sonnet</span>
               </header>
 
@@ -1067,7 +1058,7 @@ export function App() {
               >
                 {messages.length === 0 ? (
                   <div className="empty-state">
-                    <h2>What would you like to explore?</h2>
+                    <h2>What would you like to achieve?</h2>
                     <p>Describe a feature, problem, or idea to begin.</p>
                   </div>
                 ) : (

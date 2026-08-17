@@ -12,16 +12,16 @@ const {
   TasksRepository,
   MAX_FINDINGS_LENGTH,
 } = require('../findings-mcp-server');
-const { ExplorationStore } = require('../exploration-store');
+const { GoalStore } = require('../goal-store');
 
-test('findings tools read and update only their exploration in SQLite', (t) => {
+test('findings tools read and update only their goal in SQLite', (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-findings-test-'));
-  const filename = path.join(directory, 'explorations.sqlite3');
+  const filename = path.join(directory, 'goals.sqlite3');
   t.after(() => rmSync(directory, { force: true, recursive: true }));
 
-  const store = new ExplorationStore(filename);
+  const store = new GoalStore(filename);
   const base = {
-    title: 'Explore findings',
+    title: 'Record findings',
     workingDirectory: '/workspace',
     agentSession: null,
     findingsMarkdown: null,
@@ -29,14 +29,14 @@ test('findings tools read and update only their exploration in SQLite', (t) => {
     createdAt: '2026-08-09T10:00:00.000Z',
     updatedAt: '2026-08-09T10:00:00.000Z',
   };
-  store.save({ ...base, id: 'exploration-1' });
-  store.save({ ...base, id: 'exploration-2' });
+  store.save({ ...base, id: 'goal-1' });
+  store.save({ ...base, id: 'goal-2' });
 
-  const repository = new FindingsRepository(filename, 'exploration-1');
+  const repository = new FindingsRepository(filename, 'goal-1');
   assert.equal(repository.read(), null);
   assert.equal(repository.update('# Findings\n\nA decision.'), true);
   assert.equal(repository.read(), '# Findings\n\nA decision.');
-  assert.equal(store.get('exploration-2').findingsMarkdown, null);
+  assert.equal(store.get('goal-2').findingsMarkdown, null);
   assert.throws(
     () => repository.update('x'.repeat(MAX_FINDINGS_LENGTH + 1)),
     /invalid/,
@@ -46,14 +46,14 @@ test('findings tools read and update only their exploration in SQLite', (t) => {
   store.close();
 });
 
-test('task repository isolates explorations and preserves stable task identity', (t) => {
+test('task repository isolates goals and preserves stable task identity', (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-tasks-test-'));
-  const filename = path.join(directory, 'explorations.sqlite3');
+  const filename = path.join(directory, 'goals.sqlite3');
   t.after(() => rmSync(directory, { force: true, recursive: true }));
 
-  const store = new ExplorationStore(filename);
+  const store = new GoalStore(filename);
   const base = {
-    title: 'Explore tasks',
+    title: 'Break down tasks',
     workingDirectory: '/workspace',
     agentSession: null,
     findingsMarkdown: null,
@@ -62,10 +62,10 @@ test('task repository isolates explorations and preserves stable task identity',
     createdAt: '2026-08-09T10:00:00.000Z',
     updatedAt: '2026-08-09T10:00:00.000Z',
   };
-  store.save({ ...base, id: 'exploration-1' });
-  store.save({ ...base, id: 'exploration-2' });
+  store.save({ ...base, id: 'goal-1' });
+  store.save({ ...base, id: 'goal-2' });
 
-  const repository = new TasksRepository(filename, 'exploration-1');
+  const repository = new TasksRepository(filename, 'goal-1');
   const first = repository.add({
     title: 'Persist tasks',
     specMarkdown: '## Goal\n\nPersist them.',
@@ -78,7 +78,7 @@ test('task repository isolates explorations and preserves stable task identity',
   assert.equal(first.sequence, 1);
   assert.equal(second.sequence, 2);
   assert.notEqual(first.id, second.id);
-  assert.deepEqual(store.get('exploration-2').tasks, []);
+  assert.deepEqual(store.get('goal-2').tasks, []);
 
   const updated = repository.update(first.id, {
     title: 'Persist durable tasks',
@@ -98,9 +98,9 @@ test('task repository isolates explorations and preserves stable task identity',
   repository.close();
   store.close();
 
-  const reopened = new ExplorationStore(filename);
+  const reopened = new GoalStore(filename);
   assert.deepEqual(
-    reopened.get('exploration-1').tasks.map(({ id, status }) => ({
+    reopened.get('goal-1').tasks.map(({ id, status }) => ({
       id,
       status,
     })),
@@ -111,13 +111,13 @@ test('task repository isolates explorations and preserves stable task identity',
 
 test('serves read_findings and update_findings over MCP stdio', async (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-findings-mcp-test-'));
-  const filename = path.join(directory, 'explorations.sqlite3');
+  const filename = path.join(directory, 'goals.sqlite3');
   t.after(() => rmSync(directory, { force: true, recursive: true }));
 
-  const store = new ExplorationStore(filename);
+  const store = new GoalStore(filename);
   store.save({
-    id: 'exploration-1',
-    title: 'Explore findings',
+    id: 'goal-1',
+    title: 'Record findings',
     workingDirectory: '/workspace',
     agentSession: null,
     findingsMarkdown: null,
@@ -131,8 +131,8 @@ test('serves read_findings and update_findings over MCP stdio', async (t) => {
     command: process.execPath,
     args: [path.join(__dirname, '..', 'findings-mcp-server.js')],
     env: {
-      RBA_EXPLORATION_DATABASE: filename,
-      RBA_EXPLORATION_ID: 'exploration-1',
+      RBA_GOAL_DATABASE: filename,
+      RBA_GOAL_ID: 'goal-1',
     },
     stderr: 'pipe',
   });
@@ -168,7 +168,7 @@ test('serves read_findings and update_findings over MCP stdio', async (t) => {
   });
   assert.equal(updated.isError, undefined);
   assert.equal(
-    store.get('exploration-1').findingsMarkdown,
+    store.get('goal-1').findingsMarkdown,
     '# Findings\n\nUpdated through MCP.',
   );
 
@@ -181,7 +181,7 @@ test('serves read_findings and update_findings over MCP stdio', async (t) => {
   });
   assert.equal(added.isError, undefined);
 
-  const tasks = store.get('exploration-1').tasks;
+  const tasks = store.get('goal-1').tasks;
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].status, 'draft');
 
@@ -194,8 +194,8 @@ test('serves read_findings and update_findings over MCP stdio', async (t) => {
     arguments: { id: taskId, title: 'Persist durable tasks' },
   });
   await client.callTool({ name: 'commit_tasks' });
-  assert.equal(store.get('exploration-1').tasks[0].status, 'queued');
+  assert.equal(store.get('goal-1').tasks[0].status, 'queued');
 
   await client.callTool({ name: 'remove_task', arguments: { id: taskId } });
-  assert.deepEqual(store.get('exploration-1').tasks, []);
+  assert.deepEqual(store.get('goal-1').tasks, []);
 });

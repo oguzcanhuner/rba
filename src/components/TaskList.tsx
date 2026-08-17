@@ -38,7 +38,7 @@ export function TaskList({
 
       {tasks.length === 0 ? (
         <p className="tasks__empty">
-          Tasks will appear here once the exploration is ready to break down.
+          Tasks will appear here once the goal is ready to break down.
         </p>
       ) : (
         <div className="tasks__list">

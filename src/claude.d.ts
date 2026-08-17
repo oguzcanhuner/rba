@@ -5,7 +5,7 @@ export type ClaudeMessage = {
 
 export type ClaudeStartRequest = {
   requestId: string;
-  explorationId: string;
+  goalId: string;
   prompt: string;
   cwd: string;
   sessionId?: string;
@@ -78,7 +78,7 @@ export type AgentSession = {
   updatedAt: string;
 };
 
-export type ExplorationSummary = {
+export type GoalSummary = {
   id: string;
   title: string;
   workingDirectory: string;
@@ -105,11 +105,11 @@ export type Task = {
 };
 
 export type SidebarTask = Task & {
-  explorationId: string;
-  explorationTitle: string;
+  goalId: string;
+  goalTitle: string;
 };
 
-export type Exploration = ExplorationSummary & {
+export type Goal = GoalSummary & {
   agentSession: AgentSession | null;
   findingsMarkdown: string | null;
   tasks: Task[];
@@ -118,7 +118,7 @@ export type Exploration = ExplorationSummary & {
 
 export type WorkerRun = {
   taskId: string;
-  explorationId: string;
+  goalId: string;
   title: string;
   status: Exclude<TaskStatus, 'draft' | 'queued'>;
   branch: string;
@@ -144,11 +144,11 @@ declare global {
       pickDirectory(): Promise<string | null>;
       onEvent(callback: (event: ClaudeStreamEvent) => void): () => void;
     };
-    explorations: {
-      list(): Promise<ExplorationSummary[]>;
-      get(id: string): Promise<Exploration | null>;
-      save(exploration: Exploration): Promise<void>;
-      commitTasks(explorationId: string): Promise<Task[]>;
+    goals: {
+      list(): Promise<GoalSummary[]>;
+      get(id: string): Promise<Goal | null>;
+      save(goal: Goal): Promise<void>;
+      commitTasks(goalId: string): Promise<Task[]>;
     };
     tasks: {
       list(): Promise<SidebarTask[]>;

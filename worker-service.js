@@ -29,7 +29,7 @@ function finishTools(parts, status) {
 function workerTaskPrompt(task) {
   const findings = task.findingsMarkdown?.trim()
     ? task.findingsMarkdown
-    : '(No exploration findings were recorded.)';
+    : '(No findings were recorded for this goal.)';
   return `Implement this task autonomously and then stop.
 
 # Task
@@ -38,7 +38,7 @@ ${task.title}
 
 ${task.specMarkdown}
 
-# Exploration findings
+# Goal findings
 
 ${findings}`;
 }
