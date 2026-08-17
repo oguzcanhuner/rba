@@ -7,7 +7,6 @@ import {
 } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type {
-  ClaudeStreamEvent,
   DisplayMessage,
   Goal,
   GoalSummary,
@@ -25,10 +24,9 @@ import {
   ResizablePanelGroup,
 } from './components/ui/resizable';
 import { WorkerScreen } from './components/WorkerScreen';
+import { useGoalStream } from './hooks/useGoalStream';
 import {
-  appendText,
   byNewestCreation,
-  finishTools,
   goalTitle,
   restoreInterruptedMessages,
   summaryOf,
@@ -49,29 +47,102 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
-  const [queuedMessages, setQueuedMessages] = useState<
-    { id: string; text: string }[]
-  >([]);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
   const [activeTask, setActiveTask] = useState<SidebarTask | null>(null);
   const [workerDiff, setWorkerDiff] = useState('');
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesContainer = useRef<HTMLElement>(null);
-  const startGoalRequestRef = useRef<(content: string, cwd: string) => void>(
-    () => {},
-  );
   const shouldFollowMessages = useRef(true);
   const previousGoalId = useRef<string | null>(null);
   const messages = activeGoal?.messages ?? [];
 
-  const refreshSidebarTasks = useCallback(async () => {
-    try {
-      setSidebarTasks(await window.tasks.list());
-    } catch {
-      setError('Tasks could not be loaded.');
-    }
+  const refreshSidebarTasks = useCallback(() => {
+    window.tasks
+      .list()
+      .then(setSidebarTasks)
+      .catch(() => setError('Tasks could not be loaded.'));
   }, []);
+
+  const startGoalRequest = useCallback(
+    (content: string, cwd: string) => {
+      const requestId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const userMessage: DisplayMessage = {
+        id: `user-${requestId}`,
+        role: 'user',
+        status: 'complete',
+        parts: [{ type: 'text', id: `${requestId}-text-0`, text: content }],
+      };
+      const assistantMessage: DisplayMessage = {
+        id: `assistant-${requestId}`,
+        role: 'assistant',
+        status: 'streaming',
+        parts: [],
+      };
+      const goal: Goal = activeGoal
+        ? {
+            ...activeGoal,
+            updatedAt: now,
+            messages: [...activeGoal.messages, userMessage, assistantMessage],
+          }
+        : {
+            id: crypto.randomUUID(),
+            title: goalTitle(content),
+            workingDirectory: cwd,
+            agentSession: null,
+            findingsMarkdown: null,
+            tasks: [],
+            messages: [userMessage, assistantMessage],
+            createdAt: now,
+            updatedAt: now,
+          };
+
+      setActiveGoal(goal);
+      setActiveRequestId(requestId);
+      window.goals
+        .save(goal)
+        .then(() => {
+          window.claude.start({
+            requestId,
+            goalId: goal.id,
+            prompt: content,
+            cwd,
+            ...(goal.agentSession?.provider === 'claude'
+              ? { sessionId: goal.agentSession.externalId }
+              : {}),
+          });
+        })
+        .catch(() => {
+          setActiveRequestId(null);
+          setActiveGoal((current) =>
+            current
+              ? updateAssistant(current, requestId, (message) => ({
+                  ...message,
+                  status: 'error',
+                }))
+              : current,
+          );
+          setError('This goal could not be saved.');
+        });
+    },
+    [activeGoal],
+  );
+
+  const {
+    queued: queuedMessages,
+    enqueue,
+    removeQueued,
+    cancel: cancelResponse,
+  } = useGoalStream({
+    activeRequestId,
+    setActiveRequestId,
+    workingDirectory,
+    setActiveGoal,
+    setError,
+    refreshSidebarTasks,
+    startRequest: startGoalRequest,
+  });
 
   useEffect(() => {
     let disposed = false;
@@ -136,178 +207,6 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [activeGoal]);
 
-  useEffect(() => {
-    const handleEvent = (event: ClaudeStreamEvent) => {
-      if (event.type === 'findings-updated') {
-        setActiveGoal((current) =>
-          current
-            ? {
-                ...current,
-                findingsMarkdown: event.markdown,
-                updatedAt: new Date().toISOString(),
-              }
-            : current,
-        );
-        return;
-      }
-
-      if (event.type === 'tasks-updated') {
-        void refreshSidebarTasks();
-        setActiveGoal((current) =>
-          current
-            ? {
-                ...current,
-                tasks: event.tasks,
-                updatedAt: new Date().toISOString(),
-              }
-            : current,
-        );
-        return;
-      }
-
-      if (event.type === 'text-delta') {
-        setActiveGoal((current) =>
-          current
-            ? updateAssistant(current, event.requestId, (message) => ({
-                ...message,
-                parts: appendText(message.parts, event.text, event.requestId),
-              }))
-            : current,
-        );
-        return;
-      }
-
-      if (event.type === 'tool-start') {
-        setActiveGoal((current) =>
-          current
-            ? updateAssistant(current, event.requestId, (message) => ({
-                ...message,
-                parts: [
-                  ...message.parts,
-                  {
-                    type: 'tool',
-                    tool: {
-                      id: event.tool.id,
-                      name: event.tool.name,
-                      input: null,
-                      status: 'running',
-                    },
-                  },
-                ],
-              }))
-            : current,
-        );
-        return;
-      }
-
-      if (event.type === 'tool-input') {
-        setActiveGoal((current) =>
-          current
-            ? updateAssistant(current, event.requestId, (message) => ({
-                ...message,
-                parts: message.parts.map((part) =>
-                  part.type === 'tool' && part.tool.id === event.tool.id
-                    ? {
-                        ...part,
-                        tool: { ...part.tool, input: event.tool.input },
-                      }
-                    : part,
-                ),
-              }))
-            : current,
-        );
-        return;
-      }
-
-      if (event.type === 'tool-result') {
-        setActiveGoal((current) =>
-          current
-            ? updateAssistant(current, event.requestId, (message) => ({
-                ...message,
-                parts: message.parts.map((part) =>
-                  part.type === 'tool' && part.tool.id === event.tool.id
-                    ? {
-                        ...part,
-                        tool: {
-                          ...part.tool,
-                          status: event.tool.isError ? 'error' : 'complete',
-                        },
-                      }
-                    : part,
-                ),
-              }))
-            : current,
-        );
-        return;
-      }
-
-      if (event.type === 'complete') {
-        setActiveGoal((current) => {
-          if (!current) {
-            return current;
-          }
-
-          const now = new Date().toISOString();
-          const updated = updateAssistant(
-            current,
-            event.requestId,
-            (message) => ({
-              ...message,
-              status: 'complete',
-              parts: finishTools(message.parts, 'complete'),
-            }),
-          );
-          const existingSession =
-            current.agentSession?.provider === 'claude'
-              ? current.agentSession
-              : null;
-
-          return {
-            ...updated,
-            agentSession: {
-              id: existingSession?.id ?? crypto.randomUUID(),
-              provider: 'claude',
-              externalId: event.sessionId,
-              metadata: existingSession?.metadata ?? {},
-              createdAt: existingSession?.createdAt ?? now,
-              updatedAt: now,
-            },
-          };
-        });
-      } else if (event.type === 'cancelled') {
-        setActiveGoal((current) =>
-          current
-            ? updateAssistant(current, event.requestId, (message) => ({
-                ...message,
-                status: 'cancelled',
-                parts: finishTools(message.parts, 'cancelled'),
-              }))
-            : current,
-        );
-      } else {
-        setActiveGoal((current) =>
-          current
-            ? updateAssistant(current, event.requestId, (message) => ({
-                ...message,
-                status: 'error',
-                parts: finishTools(message.parts, 'error'),
-              }))
-            : current,
-        );
-        setError(event.message);
-        // A failed turn shouldn't silently fire every queued follow-up against
-        // a broken session; surface the error and let the user decide.
-        setQueuedMessages([]);
-      }
-
-      setActiveRequestId((current) =>
-        current === event.requestId ? null : current,
-      );
-    };
-
-    return window.claude.onEvent(handleEvent);
-  }, [refreshSidebarTasks]);
-
   useEffect(
     () =>
       window.workers.onEvent((event) => {
@@ -361,16 +260,6 @@ export function App() {
   );
 
   useEffect(() => {
-    if (activeRequestId || queuedMessages.length === 0 || !workingDirectory) {
-      return;
-    }
-
-    const [next, ...rest] = queuedMessages;
-    setQueuedMessages(rest);
-    startGoalRequestRef.current(next.text, workingDirectory);
-  }, [activeRequestId, queuedMessages, workingDirectory]);
-
-  useEffect(() => {
     if (!activeWorker) {
       setWorkerDiff('');
       return;
@@ -409,66 +298,6 @@ export function App() {
     }
   }, [activeGoal?.id, messages]);
 
-  async function startGoalRequest(content: string, cwd: string) {
-    const requestId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const userMessage: DisplayMessage = {
-      id: `user-${requestId}`,
-      role: 'user',
-      status: 'complete',
-      parts: [{ type: 'text', id: `${requestId}-text-0`, text: content }],
-    };
-    const assistantMessage: DisplayMessage = {
-      id: `assistant-${requestId}`,
-      role: 'assistant',
-      status: 'streaming',
-      parts: [],
-    };
-    const goal: Goal = activeGoal
-      ? {
-          ...activeGoal,
-          updatedAt: now,
-          messages: [...activeGoal.messages, userMessage, assistantMessage],
-        }
-      : {
-          id: crypto.randomUUID(),
-          title: goalTitle(content),
-          workingDirectory: cwd,
-          agentSession: null,
-          findingsMarkdown: null,
-          tasks: [],
-          messages: [userMessage, assistantMessage],
-          createdAt: now,
-          updatedAt: now,
-        };
-
-    setActiveGoal(goal);
-    setActiveRequestId(requestId);
-    try {
-      await window.goals.save(goal);
-      window.claude.start({
-        requestId,
-        goalId: goal.id,
-        prompt: content,
-        cwd,
-        ...(goal.agentSession?.provider === 'claude'
-          ? { sessionId: goal.agentSession.externalId }
-          : {}),
-      });
-    } catch {
-      setActiveRequestId(null);
-      setActiveGoal((current) =>
-        current
-          ? updateAssistant(current, requestId, (message) => ({
-              ...message,
-              status: 'error',
-            }))
-          : current,
-      );
-      setError('This goal could not be saved.');
-    }
-  }
-
   function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -483,19 +312,12 @@ export function App() {
     if (activeRequestId) {
       // A turn is already in flight, so hold this message and send it once the
       // agent finishes its current turn.
-      setQueuedMessages((queue) => [
-        ...queue,
-        { id: crypto.randomUUID(), text: content },
-      ]);
+      enqueue(content);
       return;
     }
 
-    void startGoalRequest(content, workingDirectory);
+    startGoalRequest(content, workingDirectory);
   }
-
-  startGoalRequestRef.current = (content, cwd) => {
-    void startGoalRequest(content, cwd);
-  };
 
   async function persistCurrentGoal() {
     if (activeGoal) {
@@ -561,12 +383,6 @@ export function App() {
     }
   }
 
-  function cancelResponse() {
-    if (activeRequestId) {
-      window.claude.cancel(activeRequestId);
-    }
-  }
-
   async function commitTasks() {
     if (!activeGoal || activeRequestId) {
       return;
@@ -579,7 +395,7 @@ export function App() {
           ? { ...current, tasks, updatedAt: new Date().toISOString() }
           : current,
       );
-      await refreshSidebarTasks();
+      refreshSidebarTasks();
     } catch {
       setError('Tasks could not be queued.');
     }
@@ -768,11 +584,7 @@ export function App() {
                 onSubmit={submitMessage}
                 onCancel={cancelResponse}
                 onChooseDirectory={chooseWorkingDirectory}
-                onRemoveQueued={(id) =>
-                  setQueuedMessages((queue) =>
-                    queue.filter((item) => item.id !== id),
-                  )
-                }
+                onRemoveQueued={removeQueued}
               />
             </section>
           </ResizablePanel>

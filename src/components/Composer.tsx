@@ -1,8 +1,7 @@
 import type { FormEvent, KeyboardEvent } from 'react';
+import type { QueuedMessage } from '../hooks/useGoalStream';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-
-export type QueuedMessage = { id: string; text: string };
 
 type ComposerProps = {
   draft: string;
