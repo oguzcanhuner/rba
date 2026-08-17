@@ -1,11 +1,11 @@
 import findingsEmptyIcon from '../assets/findings-empty.svg';
-import type { Goal, SidebarTask, Task } from '../claude';
+import type { Goal, SidebarTask } from '../claude';
 import { MarkdownContent } from './MarkdownContent';
 import { TaskList } from './TaskList';
 
 type FindingsPanelProps = {
   goal: Goal | null;
-  tasks: Task[];
+  tasks: SidebarTask[];
   commitDisabled: boolean;
   onCommit: () => void;
   onOpenTask: (task: SidebarTask) => void;
@@ -54,9 +54,7 @@ export function FindingsPanel({
             tasks={tasks}
             commitDisabled={commitDisabled}
             onCommit={onCommit}
-            onOpenTask={(task) =>
-              onOpenTask({ ...task, goalId: goal.id, goalTitle: goal.title })
-            }
+            onOpenTask={onOpenTask}
           />
         )}
       </div>

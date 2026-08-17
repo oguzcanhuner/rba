@@ -2,19 +2,19 @@ import type { Task } from '../claude';
 import { MarkdownContent } from './MarkdownContent';
 import { Button } from './ui/button';
 
-type TaskListProps = {
-  tasks: Task[];
+type TaskListProps<T extends Task> = {
+  tasks: T[];
   commitDisabled: boolean;
   onCommit: () => void;
-  onOpenTask: (task: Task) => void;
+  onOpenTask: (task: T) => void;
 };
 
-export function TaskList({
+export function TaskList<T extends Task>({
   tasks,
   commitDisabled,
   onCommit,
   onOpenTask,
-}: TaskListProps) {
+}: TaskListProps<T>) {
   const draftCount = tasks.filter((task) => task.status === 'draft').length;
 
   return (
