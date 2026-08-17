@@ -1,10 +1,4 @@
-import {
-  type FormEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type {
   DisplayMessage,
@@ -13,10 +7,9 @@ import type {
   GoalWithTasks,
   Task,
 } from './claude';
-import { Composer } from './components/Composer';
+import { ChatPanel } from './components/ChatPanel';
 import { FindingsPanel } from './components/FindingsPanel';
 import { GoalSidebar } from './components/GoalSidebar';
-import { MessageThread } from './components/MessageThread';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -33,7 +26,6 @@ import {
   summaryOf,
   updateAssistant,
 } from './lib/goalState';
-import { plannerToolLabel } from './lib/toolLabels';
 
 export function App() {
   const workspaceLayout = useDefaultLayout({
@@ -48,9 +40,6 @@ export function App() {
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const messagesContainer = useRef<HTMLElement>(null);
-  const shouldFollowMessages = useRef(true);
-  const previousGoalId = useRef<string | null>(null);
   const messages = activeGoal?.messages ?? [];
 
   const tasks = useTasks(activeGoal?.id ?? null);
@@ -233,19 +222,6 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [activeGoal]);
 
-  useEffect(() => {
-    const goalId = activeGoal?.id ?? null;
-    if (goalId !== previousGoalId.current) {
-      previousGoalId.current = goalId;
-      shouldFollowMessages.current = true;
-    }
-
-    const container = messagesContainer.current;
-    if (messages.length > 0 && container && shouldFollowMessages.current) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [activeGoal?.id, messages]);
-
   function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -402,52 +378,21 @@ export function App() {
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={45} id="chat" minSize={30}>
-            <section className="chat">
-              <header className="chat__header">
-                <h1>{activeGoal?.title ?? 'RBA'}</h1>
-                <span>Sonnet</span>
-              </header>
-
-              <section
-                className="messages"
-                aria-live="polite"
-                ref={messagesContainer}
-                onScroll={(event) => {
-                  const container = event.currentTarget;
-                  const distanceFromEnd =
-                    container.scrollHeight -
-                    container.scrollTop -
-                    container.clientHeight;
-                  shouldFollowMessages.current = distanceFromEnd <= 24;
-                }}
-              >
-                {messages.length === 0 ? (
-                  <div className="empty-state">
-                    <h2>What would you like to achieve?</h2>
-                    <p>Describe a feature, problem, or idea to begin.</p>
-                  </div>
-                ) : (
-                  <MessageThread
-                    assistantLabel="RBA"
-                    messages={messages}
-                    toolLabel={plannerToolLabel}
-                  />
-                )}
-              </section>
-
-              <Composer
-                draft={draft}
-                queued={queuedMessages}
-                workingDirectory={workingDirectory}
-                error={error}
-                isBusy={activeRequestId !== null}
-                onDraftChange={setDraft}
-                onSubmit={submitMessage}
-                onCancel={cancelResponse}
-                onChooseDirectory={chooseWorkingDirectory}
-                onRemoveQueued={removeQueued}
-              />
-            </section>
+            <ChatPanel
+              title={activeGoal?.title ?? null}
+              goalId={activeGoal?.id ?? null}
+              messages={messages}
+              draft={draft}
+              queued={queuedMessages}
+              workingDirectory={workingDirectory}
+              error={error}
+              isBusy={activeRequestId !== null}
+              onDraftChange={setDraft}
+              onSubmit={submitMessage}
+              onCancel={cancelResponse}
+              onChooseDirectory={chooseWorkingDirectory}
+              onRemoveQueued={removeQueued}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
