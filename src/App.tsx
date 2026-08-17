@@ -1,15 +1,11 @@
 import {
   type FormEvent,
-  type KeyboardEvent,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
-import findingsEmptyIcon from './assets/findings-empty.svg';
-import plusIcon from './assets/plus.svg';
-import sidebarCollapseIcon from './assets/sidebar-collapse.svg';
 import type {
   ClaudeStreamEvent,
   DisplayMessage,
@@ -19,16 +15,15 @@ import type {
   Task,
   WorkerRun,
 } from './claude';
-import { MarkdownContent } from './components/MarkdownContent';
+import { Composer } from './components/Composer';
+import { FindingsPanel } from './components/FindingsPanel';
+import { GoalSidebar } from './components/GoalSidebar';
 import { MessageThread } from './components/MessageThread';
-import { TaskList } from './components/TaskList';
-import { Button } from './components/ui/button';
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable';
-import { Textarea } from './components/ui/textarea';
 import { WorkerScreen } from './components/WorkerScreen';
 import {
   appendText,
@@ -566,17 +561,6 @@ export function App() {
     }
   }
 
-  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (
-      event.key === 'Enter' &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
-    ) {
-      event.preventDefault();
-      event.currentTarget.form?.requestSubmit();
-    }
-  }
-
   function cancelResponse() {
     if (activeRequestId) {
       window.claude.cancel(activeRequestId);
@@ -690,111 +674,19 @@ export function App() {
       }
     >
       {!activeTask && (
-        <aside
-          className="goal-sidebar"
-          id="goal-sidebar"
-          aria-label="Goals and tasks"
-        >
-          <div className="goal-sidebar__header">
-            {!isSidebarCollapsed && <span>Goals</span>}
-            <div className="goal-sidebar__actions">
-              {!isSidebarCollapsed && (
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  disabled={activeRequestId !== null}
-                  aria-label="New goal"
-                  title="New goal"
-                  onClick={startNewGoal}
-                >
-                  <img
-                    className="goal-sidebar__new-icon"
-                    src={plusIcon}
-                    alt=""
-                    aria-hidden="true"
-                  />
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-controls="goal-sidebar"
-                aria-expanded={!isSidebarCollapsed}
-                aria-label={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} goals sidebar`}
-                title={`${isSidebarCollapsed ? 'Expand' : 'Collapse'} goals sidebar`}
-                onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
-              >
-                <img
-                  className={`goal-sidebar__toggle-icon${isSidebarCollapsed ? ' goal-sidebar__toggle-icon--expand' : ''}`}
-                  src={sidebarCollapseIcon}
-                  alt=""
-                  aria-hidden="true"
-                />
-              </Button>
-            </div>
-          </div>
-          {!isSidebarCollapsed && (
-            <div className="sidebar-content">
-              <nav className="goal-list" aria-label="Goals">
-                {goals.length === 0 ? (
-                  <p className="goal-list__empty">No goals yet</p>
-                ) : (
-                  goals.map((goal) => (
-                    <Button
-                      className="goal-list__item"
-                      type="button"
-                      variant="ghost"
-                      key={goal.id}
-                      disabled={activeRequestId !== null}
-                      aria-current={
-                        goal.id === activeGoal?.id ? 'page' : undefined
-                      }
-                      title={goal.title}
-                      onClick={() => selectGoal(goal.id)}
-                    >
-                      {goal.title}
-                    </Button>
-                  ))
-                )}
-              </nav>
-              <section
-                className="sidebar-tasks"
-                aria-labelledby="sidebar-tasks-heading"
-              >
-                <h2 id="sidebar-tasks-heading">Tasks</h2>
-                {sidebarTasks.length === 0 ? (
-                  <p className="goal-list__empty">No queued tasks yet</p>
-                ) : (
-                  <div className="sidebar-task-list">
-                    {sidebarTasks.map((task) => (
-                      <Button
-                        className="sidebar-task"
-                        type="button"
-                        variant="ghost"
-                        key={task.id}
-                        title={task.title}
-                        onClick={() => openTask(task)}
-                      >
-                        <span className="sidebar-task__title">
-                          {task.title}
-                        </span>
-                        <span
-                          className={`sidebar-task__status task__status task__status--${task.status}`}
-                        >
-                          {task.status}
-                        </span>
-                        <span className="sidebar-task__goal">
-                          {task.goalTitle}
-                        </span>
-                      </Button>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-          )}
-        </aside>
+        <GoalSidebar
+          goals={goals}
+          tasks={sidebarTasks}
+          activeGoalId={activeGoal?.id ?? null}
+          isCollapsed={isSidebarCollapsed}
+          isBusy={activeRequestId !== null}
+          onToggleCollapse={() =>
+            setIsSidebarCollapsed((collapsed) => !collapsed)
+          }
+          onNewGoal={startNewGoal}
+          onSelectGoal={selectGoal}
+          onOpenTask={openTask}
+        />
       )}
 
       {activeTask ? (
@@ -822,56 +714,14 @@ export function App() {
           orientation="horizontal"
         >
           <ResizablePanel defaultSize={55} id="findings" minSize={30}>
-            <aside className="findings" aria-label="Goal findings">
-              <header className="findings__header">
-                <h2>Findings</h2>
-              </header>
-              <div className="findings__content" aria-live="polite">
-                <div
-                  className={`findings__document${activeGoal?.findingsMarkdown ? '' : ' findings__document--empty'}`}
-                >
-                  {activeGoal?.findingsMarkdown ? (
-                    <MarkdownContent className="typeset-findings">
-                      {activeGoal.findingsMarkdown}
-                    </MarkdownContent>
-                  ) : (
-                    <div className="findings-empty">
-                      <img
-                        className="findings-empty__graphic"
-                        src={findingsEmptyIcon}
-                        alt=""
-                        aria-hidden="true"
-                      />
-                      <div className="findings-empty__copy">
-                        <h3>Findings will take shape here</h3>
-                        <p>
-                          As the goal takes shape, key insights and decisions
-                          will be gathered into a clear, evolving summary.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {activeGoal && (
-                  <TaskList
-                    tasks={activeGoal.tasks}
-                    commitDisabled={
-                      activeRequestId !== null || startingTaskId !== null
-                    }
-                    onCommit={commitTasks}
-                    onOpenTask={(task) => {
-                      if (activeGoal) {
-                        void openTask({
-                          ...task,
-                          goalId: activeGoal.id,
-                          goalTitle: activeGoal.title,
-                        });
-                      }
-                    }}
-                  />
-                )}
-              </div>
-            </aside>
+            <FindingsPanel
+              goal={activeGoal}
+              commitDisabled={
+                activeRequestId !== null || startingTaskId !== null
+              }
+              onCommit={commitTasks}
+              onOpenTask={openTask}
+            />
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={45} id="chat" minSize={30}>
@@ -908,78 +758,22 @@ export function App() {
                 )}
               </section>
 
-              <footer className="composer-area">
-                {error && <div className="error-message">{error}</div>}
-                <div className="working-directory">
-                  <span title={workingDirectory ?? undefined}>
-                    Working directory: {workingDirectory ?? 'Loading…'}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    disabled={activeRequestId !== null}
-                    onClick={chooseWorkingDirectory}
-                  >
-                    Choose folder
-                  </Button>
-                </div>
-                {queuedMessages.length > 0 && (
-                  <ul className="composer-queue" aria-label="Queued messages">
-                    {queuedMessages.map((message) => (
-                      <li className="composer-queue__item" key={message.id}>
-                        <span className="composer-queue__label">Queued</span>
-                        <span className="composer-queue__text">
-                          {message.text}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          aria-label="Remove queued message"
-                          onClick={() =>
-                            setQueuedMessages((queue) =>
-                              queue.filter((item) => item.id !== message.id),
-                            )
-                          }
-                        >
-                          Remove
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <form className="composer" onSubmit={submitMessage}>
-                  <Textarea
-                    className="composer__input"
-                    aria-label="Message RBA"
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={handleComposerKeyDown}
-                    placeholder={activeRequestId ? 'Steer RBA…' : 'Message RBA'}
-                    rows={3}
-                    value={draft}
-                  />
-                  <div className="composer__actions">
-                    <Button type="submit" disabled={!draft.trim()}>
-                      {activeRequestId ? 'Queue' : 'Send'}
-                    </Button>
-                    {activeRequestId && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={cancelResponse}
-                      >
-                        Stop
-                      </Button>
-                    )}
-                  </div>
-                </form>
-                <p className="composer-hint">
-                  {activeRequestId
-                    ? 'Enter to queue · sends when the current turn finishes'
-                    : 'Enter to send · Shift+Enter for a new line'}
-                </p>
-              </footer>
+              <Composer
+                draft={draft}
+                queued={queuedMessages}
+                workingDirectory={workingDirectory}
+                error={error}
+                isBusy={activeRequestId !== null}
+                onDraftChange={setDraft}
+                onSubmit={submitMessage}
+                onCancel={cancelResponse}
+                onChooseDirectory={chooseWorkingDirectory}
+                onRemoveQueued={(id) =>
+                  setQueuedMessages((queue) =>
+                    queue.filter((item) => item.id !== id),
+                  )
+                }
+              />
             </section>
           </ResizablePanel>
         </ResizablePanelGroup>
