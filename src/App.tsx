@@ -18,7 +18,6 @@ import type {
   GoalSummary,
   SidebarTask,
   Task,
-  ToolStatus,
   WorkerRun,
 } from './claude';
 import { MarkdownContent } from './components/MarkdownContent';
@@ -31,6 +30,15 @@ import {
 } from './components/ui/resizable';
 import { Textarea } from './components/ui/textarea';
 import { WorkerScreen } from './components/WorkerScreen';
+import {
+  appendText,
+  byNewestCreation,
+  finishTools,
+  goalTitle,
+  restoreInterruptedMessages,
+  summaryOf,
+  updateAssistant,
+} from './lib/goalState';
 
 function statusLabel(message: DisplayMessage) {
   if (message.status === 'cancelled') {
@@ -140,82 +148,6 @@ function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
             ? tool.input.url
             : tool.input.file_path;
   return typeof value === 'string' ? value : null;
-}
-
-function appendText(
-  parts: DisplayPart[],
-  text: string,
-  requestId: string,
-): DisplayPart[] {
-  const lastPart = parts.at(-1);
-
-  if (lastPart?.type === 'text') {
-    return [
-      ...parts.slice(0, -1),
-      { type: 'text', id: lastPart.id, text: lastPart.text + text },
-    ];
-  }
-
-  return [
-    ...parts,
-    { type: 'text', id: `${requestId}-text-${parts.length}`, text },
-  ];
-}
-
-function finishTools(parts: DisplayPart[], status: ToolStatus) {
-  return parts.map((part) =>
-    part.type === 'tool' && part.tool.status === 'running'
-      ? { ...part, tool: { ...part.tool, status } }
-      : part,
-  );
-}
-
-function goalTitle(message: string) {
-  const title = message.replace(/\s+/g, ' ').trim();
-  return title.length <= 60 ? title : `${title.slice(0, 57).trimEnd()}…`;
-}
-
-function summaryOf(goal: Goal): GoalSummary {
-  const {
-    agentSession: _agentSession,
-    findingsMarkdown: _findingsMarkdown,
-    messages: _messages,
-    ...summary
-  } = goal;
-  return summary;
-}
-
-function byNewestCreation(left: GoalSummary, right: GoalSummary) {
-  return right.createdAt.localeCompare(left.createdAt);
-}
-
-function restoreInterruptedMessages(goal: Goal): Goal {
-  return {
-    ...goal,
-    messages: goal.messages.map((message) =>
-      message.status === 'streaming'
-        ? {
-            ...message,
-            status: 'error',
-            parts: finishTools(message.parts, 'error'),
-          }
-        : message,
-    ),
-  };
-}
-
-function updateAssistant(
-  goal: Goal,
-  requestId: string,
-  update: (message: DisplayMessage) => DisplayMessage,
-) {
-  return {
-    ...goal,
-    updatedAt: new Date().toISOString(),
-    messages: goal.messages.map((message) =>
-      message.id === `assistant-${requestId}` ? update(message) : message,
-    ),
-  };
 }
 
 export function App() {
