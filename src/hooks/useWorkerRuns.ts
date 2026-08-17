@@ -5,11 +5,10 @@ import {
   useEffect,
   useState,
 } from 'react';
-import type { Goal, SidebarTask, WorkerRun } from '../claude';
+import type { SidebarTask, TaskStatus, WorkerRun } from '../claude';
 
 type WorkerRunsOptions = {
-  setActiveGoal: Dispatch<SetStateAction<Goal | null>>;
-  setSidebarTasks: Dispatch<SetStateAction<SidebarTask[]>>;
+  setTaskStatus: (taskId: string, status: TaskStatus) => void;
   setError: Dispatch<SetStateAction<string | null>>;
 };
 
@@ -17,11 +16,7 @@ type WorkerRunsOptions = {
  * Owns the task the user has opened and the worker running against it,
  * including the diff of the worktree it is editing.
  */
-export function useWorkerRuns({
-  setActiveGoal,
-  setSidebarTasks,
-  setError,
-}: WorkerRunsOptions) {
+export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
   const [activeTask, setActiveTask] = useState<SidebarTask | null>(null);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
   const [diff, setDiff] = useState('');
@@ -31,33 +26,7 @@ export function useWorkerRuns({
     () =>
       window.workers.onEvent((event) => {
         const { run } = event;
-        // A worker broadcasts on every streamed delta, so only build new state
-        // when the status actually moved. Otherwise each delta gives the goal a
-        // fresh identity and the autosave effect rewrites the whole planner
-        // conversation to disk, over and over, for the length of the run.
-        setActiveGoal((current) => {
-          if (
-            current?.id !== run.goalId ||
-            !current.tasks.some(
-              (task) => task.id === run.taskId && task.status !== run.status,
-            )
-          ) {
-            return current;
-          }
-
-          return {
-            ...current,
-            tasks: current.tasks.map((task) =>
-              task.id === run.taskId
-                ? {
-                    ...task,
-                    status: run.status,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : task,
-            ),
-          };
-        });
+        setTaskStatus(run.taskId, run.status);
         setActiveWorker((current) =>
           current?.taskId === run.taskId ? run : current,
         );
@@ -66,17 +35,8 @@ export function useWorkerRuns({
             ? { ...current, status: run.status }
             : current,
         );
-        setSidebarTasks((current) =>
-          current.some(
-            (task) => task.id === run.taskId && task.status !== run.status,
-          )
-            ? current.map((task) =>
-                task.id === run.taskId ? { ...task, status: run.status } : task,
-              )
-            : current,
-        );
       }),
-    [setActiveGoal, setSidebarTasks],
+    [setTaskStatus],
   );
 
   useEffect(() => {
@@ -140,25 +100,9 @@ export function useWorkerRuns({
       setError(null);
       try {
         const run = await window.workers.start(task.id);
-        setActiveGoal((current) =>
-          current
-            ? {
-                ...current,
-                tasks: current.tasks.map((currentTask) =>
-                  currentTask.id === task.id
-                    ? { ...currentTask, status: run.status }
-                    : currentTask,
-                ),
-              }
-            : current,
-        );
+        setTaskStatus(task.id, run.status);
         setActiveWorker(run);
         setActiveTask({ ...task, status: run.status });
-        setSidebarTasks((current) =>
-          current.map((item) =>
-            item.id === task.id ? { ...item, status: run.status } : item,
-          ),
-        );
       } catch {
         setError(
           'This task could not be started. Make sure the folder is a git repository.',
@@ -167,7 +111,7 @@ export function useWorkerRuns({
         setStartingTaskId(null);
       }
     },
-    [setActiveGoal, setSidebarTasks, setError],
+    [setTaskStatus, setError],
   );
 
   const stop = useCallback(async () => {

@@ -5,7 +5,7 @@ import {
   useEffect,
   useState,
 } from 'react';
-import type { ClaudeStreamEvent, Goal } from '../claude';
+import type { ClaudeStreamEvent, Goal, Task } from '../claude';
 import { appendText, finishTools, updateAssistant } from '../lib/goalState';
 
 export type QueuedMessage = { id: string; text: string };
@@ -16,7 +16,9 @@ type GoalStreamOptions = {
   workingDirectory: string | null;
   setActiveGoal: Dispatch<SetStateAction<Goal | null>>;
   setError: Dispatch<SetStateAction<string | null>>;
-  refreshSidebarTasks: () => void;
+  activeGoalId: string | null;
+  activeGoalTitle: string | null;
+  replaceGoalTasks: (goalId: string, goalTitle: string, tasks: Task[]) => void;
   startRequest: (content: string, cwd: string) => void;
 };
 
@@ -30,7 +32,9 @@ export function useGoalStream({
   workingDirectory,
   setActiveGoal,
   setError,
-  refreshSidebarTasks,
+  activeGoalId,
+  activeGoalTitle,
+  replaceGoalTasks,
   startRequest,
 }: GoalStreamOptions) {
   const [queued, setQueued] = useState<QueuedMessage[]>([]);
@@ -51,14 +55,12 @@ export function useGoalStream({
       }
 
       if (event.type === 'tasks-updated') {
-        refreshSidebarTasks();
+        if (activeGoalId && activeGoalTitle) {
+          replaceGoalTasks(activeGoalId, activeGoalTitle, event.tasks);
+        }
         setActiveGoal((current) =>
           current
-            ? {
-                ...current,
-                tasks: event.tasks,
-                updatedAt: new Date().toISOString(),
-              }
+            ? { ...current, updatedAt: new Date().toISOString() }
             : current,
         );
         return;
@@ -205,7 +207,16 @@ export function useGoalStream({
     };
 
     return window.claude.onEvent(handleEvent);
-  }, [refreshSidebarTasks, setActiveGoal, setActiveRequestId, setError]);
+    // The goal identity is read inside the handler, so the subscription is
+    // rebuilt when the user switches goals — not on every streamed delta.
+  }, [
+    activeGoalId,
+    activeGoalTitle,
+    replaceGoalTasks,
+    setActiveGoal,
+    setActiveRequestId,
+    setError,
+  ]);
 
   useEffect(() => {
     if (activeRequestId || queued.length === 0 || !workingDirectory) {

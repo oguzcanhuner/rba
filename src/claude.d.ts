@@ -112,9 +112,12 @@ export type SidebarTask = Task & {
 export type Goal = GoalSummary & {
   agentSession: AgentSession | null;
   findingsMarkdown: string | null;
-  tasks: Task[];
   messages: DisplayMessage[];
 };
+
+/** What the store hands back on load. Tasks are owned by the task cache from
+ * there on, and the store never writes them back from a goal save. */
+export type GoalWithTasks = Goal & { tasks: Task[] };
 
 export type WorkerRun = {
   taskId: string;
@@ -146,7 +149,7 @@ declare global {
     };
     goals: {
       list(): Promise<GoalSummary[]>;
-      get(id: string): Promise<Goal | null>;
+      get(id: string): Promise<GoalWithTasks | null>;
       save(goal: Goal): Promise<void>;
       commitTasks(goalId: string): Promise<Task[]>;
     };

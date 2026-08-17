@@ -10,7 +10,7 @@ import type {
   DisplayMessage,
   Goal,
   GoalSummary,
-  SidebarTask,
+  GoalWithTasks,
   Task,
 } from './claude';
 import { Composer } from './components/Composer';
@@ -24,6 +24,7 @@ import {
 } from './components/ui/resizable';
 import { WorkerScreen } from './components/WorkerScreen';
 import { useGoalStream } from './hooks/useGoalStream';
+import { useTasks } from './hooks/useTasks';
 import { useWorkerRuns } from './hooks/useWorkerRuns';
 import {
   byNewestCreation,
@@ -41,7 +42,6 @@ export function App() {
     storage: window.localStorage,
   });
   const [goals, setGoals] = useState<GoalSummary[]>([]);
-  const [sidebarTasks, setSidebarTasks] = useState<SidebarTask[]>([]);
   const [activeGoal, setActiveGoal] = useState<Goal | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [draft, setDraft] = useState('');
@@ -53,12 +53,28 @@ export function App() {
   const previousGoalId = useRef<string | null>(null);
   const messages = activeGoal?.messages ?? [];
 
-  const refreshSidebarTasks = useCallback(() => {
-    window.tasks
-      .list()
-      .then(setSidebarTasks)
-      .catch(() => setError('Tasks could not be loaded.'));
-  }, []);
+  const tasks = useTasks(activeGoal?.id ?? null);
+  const { replaceAll: replaceAllTasks, replaceGoalTasks } = tasks;
+
+  const openGoal = useCallback(
+    (loaded: GoalWithTasks) => {
+      const { tasks: goalTasks, ...goal } = loaded;
+      const restored = restoreInterruptedMessages(goal);
+      setActiveGoal(restored);
+      replaceGoalTasks(restored.id, restored.title, goalTasks);
+      return restored;
+    },
+    [replaceGoalTasks],
+  );
+
+  const applyTasksUpdate = useCallback(
+    (updated: Task[]) => {
+      if (activeGoal) {
+        replaceGoalTasks(activeGoal.id, activeGoal.title, updated);
+      }
+    },
+    [activeGoal, replaceGoalTasks],
+  );
 
   const startGoalRequest = useCallback(
     (content: string, cwd: string) => {
@@ -88,7 +104,6 @@ export function App() {
             workingDirectory: cwd,
             agentSession: null,
             findingsMarkdown: null,
-            tasks: [],
             messages: [userMessage, assistantMessage],
             createdAt: now,
             updatedAt: now,
@@ -136,7 +151,9 @@ export function App() {
     workingDirectory,
     setActiveGoal,
     setError,
-    refreshSidebarTasks,
+    activeGoalId: activeGoal?.id ?? null,
+    activeGoalTitle: activeGoal?.title ?? null,
+    replaceGoalTasks,
     startRequest: startGoalRequest,
   });
 
@@ -150,7 +167,7 @@ export function App() {
     start: startWorker,
     stop: stopWorker,
     send: sendWorkerMessage,
-  } = useWorkerRuns({ setActiveGoal, setSidebarTasks, setError });
+  } = useWorkerRuns({ setTaskStatus: tasks.setStatus, setError });
 
   useEffect(() => {
     let disposed = false;
@@ -166,14 +183,15 @@ export function App() {
         }
 
         setGoals(savedGoals);
-        setSidebarTasks(savedTasks);
+        // Seed the whole cache before the goal load narrows it, so the goal's
+        // own drafts are not wiped by a list that arrives late.
+        replaceAllTasks(savedTasks);
         const latest = savedGoals[0];
 
         if (latest) {
           const saved = await window.goals.get(latest.id);
           if (!disposed && saved) {
-            const restored = restoreInterruptedMessages(saved);
-            setActiveGoal(restored);
+            const restored = openGoal(saved);
             setWorkingDirectory(restored.workingDirectory);
           }
         } else {
@@ -189,7 +207,7 @@ export function App() {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [replaceAllTasks, openGoal]);
 
   useEffect(() => {
     if (!activeGoal) {
@@ -282,8 +300,7 @@ export function App() {
       const goal = await window.goals.get(id);
 
       if (goal) {
-        const restored = restoreInterruptedMessages(goal);
-        setActiveGoal(restored);
+        const restored = openGoal(goal);
         setWorkingDirectory(restored.workingDirectory);
         closeWorker();
         setDraft('');
@@ -316,13 +333,10 @@ export function App() {
     }
 
     try {
-      const tasks: Task[] = await window.goals.commitTasks(activeGoal.id);
+      applyTasksUpdate(await window.goals.commitTasks(activeGoal.id));
       setActiveGoal((current) =>
-        current
-          ? { ...current, tasks, updatedAt: new Date().toISOString() }
-          : current,
+        current ? { ...current, updatedAt: new Date().toISOString() } : current,
       );
-      refreshSidebarTasks();
     } catch {
       setError('Tasks could not be queued.');
     }
@@ -339,7 +353,7 @@ export function App() {
       {!activeTask && (
         <GoalSidebar
           goals={goals}
-          tasks={sidebarTasks}
+          tasks={tasks.committed}
           activeGoalId={activeGoal?.id ?? null}
           isCollapsed={isSidebarCollapsed}
           isBusy={activeRequestId !== null}
@@ -378,6 +392,7 @@ export function App() {
           <ResizablePanel defaultSize={55} id="findings" minSize={30}>
             <FindingsPanel
               goal={activeGoal}
+              tasks={tasks.forActiveGoal}
               commitDisabled={
                 activeRequestId !== null || startingTaskId !== null
               }

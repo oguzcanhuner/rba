@@ -44,7 +44,6 @@ export function summaryOf(goal: Goal): GoalSummary {
     agentSession: _agentSession,
     findingsMarkdown: _findingsMarkdown,
     messages: _messages,
-    tasks: _tasks,
     ...summary
   } = goal;
   return summary;
