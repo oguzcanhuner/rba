@@ -99,32 +99,8 @@ function isValidGoal(goal) {
         (typeof goal.findingsMarkdown === 'string' &&
           goal.findingsMarkdown.length <= 500_000)) &&
       validSession &&
-      Array.isArray(goal.tasks) &&
-      goal.tasks.length <= 1_000 &&
-      goal.tasks.every(
-        (task) =>
-          task &&
-          typeof task.id === 'string' &&
-          task.id.length > 0 &&
-          task.id.length <= 100 &&
-          Number.isSafeInteger(task.sequence) &&
-          task.sequence > 0 &&
-          typeof task.title === 'string' &&
-          task.title.length > 0 &&
-          task.title.length <= 200 &&
-          typeof task.specMarkdown === 'string' &&
-          task.specMarkdown.length <= 500_000 &&
-          [
-            'draft',
-            'queued',
-            'working',
-            'completed',
-            'stopped',
-            'failed',
-          ].includes(task.status) &&
-          typeof task.createdAt === 'string' &&
-          typeof task.updatedAt === 'string',
-      ) &&
+      // Tasks are deliberately not validated here: a goal save never writes a
+      // task row, so the renderer does not send them.
       Array.isArray(goal.messages) &&
       goal.messages.length <= 10_000 &&
       goal.messages.every(
