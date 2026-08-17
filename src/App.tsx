@@ -20,6 +20,7 @@ import type {
   WorkerRun,
 } from './claude';
 import { MarkdownContent } from './components/MarkdownContent';
+import { MessageThread } from './components/MessageThread';
 import { TaskList } from './components/TaskList';
 import { Button } from './components/ui/button';
 import {
@@ -38,19 +39,7 @@ import {
   summaryOf,
   updateAssistant,
 } from './lib/goalState';
-import { plannerToolLabel, toolDetail } from './lib/toolLabels';
-
-function statusLabel(message: DisplayMessage) {
-  if (message.status === 'cancelled') {
-    return 'Stopped';
-  }
-
-  if (message.status === 'error') {
-    return 'Interrupted';
-  }
-
-  return null;
-}
+import { plannerToolLabel } from './lib/toolLabels';
 
 export function App() {
   const workspaceLayout = useDefaultLayout({
@@ -911,72 +900,11 @@ export function App() {
                     <p>Describe a feature, problem, or idea to begin.</p>
                   </div>
                 ) : (
-                  messages.map((message) => {
-                    const label = statusLabel(message);
-
-                    return (
-                      <article
-                        className={`message message--${message.role}`}
-                        key={message.id}
-                      >
-                        <div className="message__role">
-                          {message.role === 'user' ? 'You' : 'RBA'}
-                        </div>
-                        {message.parts.length > 0 ? (
-                          message.parts.map((part) => {
-                            if (part.type === 'text') {
-                              if (message.role === 'assistant') {
-                                return (
-                                  <MarkdownContent
-                                    className="message__part message__content"
-                                    key={part.id}
-                                  >
-                                    {part.text}
-                                  </MarkdownContent>
-                                );
-                              }
-
-                              return (
-                                <div
-                                  className="message__part message__content"
-                                  key={part.id}
-                                >
-                                  {part.text}
-                                </div>
-                              );
-                            }
-
-                            const tool = part.tool;
-                            const detail = toolDetail(tool);
-
-                            return (
-                              <div
-                                className={`message__part tool-use tool-use--${tool.status}`}
-                                key={tool.id}
-                              >
-                                <span className="tool-use__indicator" />
-                                <span className="tool-use__label">
-                                  {plannerToolLabel(tool)}
-                                </span>
-                                {detail && (
-                                  <code className="tool-use__detail">
-                                    {detail}
-                                  </code>
-                                )}
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div className="message__content">
-                            <span className="thinking">Thinking…</span>
-                          </div>
-                        )}
-                        {label && (
-                          <div className="message__status">{label}</div>
-                        )}
-                      </article>
-                    );
-                  })
+                  <MessageThread
+                    assistantLabel="RBA"
+                    messages={messages}
+                    toolLabel={plannerToolLabel}
+                  />
                 )}
               </section>
 

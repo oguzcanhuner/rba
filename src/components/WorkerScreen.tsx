@@ -8,8 +8,9 @@ import {
 } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type { SidebarTask, WorkerRun } from '../claude';
-import { toolDetail, workerToolLabel } from '../lib/toolLabels';
+import { workerToolLabel } from '../lib/toolLabels';
 import { MarkdownContent } from './MarkdownContent';
+import { MessageThread } from './MessageThread';
 import { Button } from './ui/button';
 import {
   ResizableHandle,
@@ -183,64 +184,11 @@ export function WorkerScreen({
               aria-live="polite"
               ref={messages}
             >
-              {run.messages.map((message) => (
-                <article
-                  className={`message message--${message.role}`}
-                  key={message.id}
-                >
-                  <div className="message__role">
-                    {message.role === 'user' ? 'You' : 'Worker'}
-                  </div>
-                  {message.parts.length === 0 &&
-                  message.status === 'streaming' ? (
-                    <div className="message__content">
-                      <span className="thinking">Thinking…</span>
-                    </div>
-                  ) : (
-                    message.parts.map((part) => {
-                      if (part.type === 'text') {
-                        return message.role === 'assistant' ? (
-                          <MarkdownContent
-                            className="message__part message__content"
-                            key={part.id}
-                          >
-                            {part.text}
-                          </MarkdownContent>
-                        ) : (
-                          <div
-                            className="message__part message__content"
-                            key={part.id}
-                          >
-                            {part.text}
-                          </div>
-                        );
-                      }
-
-                      const detail = toolDetail(part.tool);
-                      return (
-                        <div
-                          className={`message__part tool-use tool-use--${part.tool.status}`}
-                          key={part.tool.id}
-                        >
-                          <span className="tool-use__indicator" />
-                          <span className="tool-use__label">
-                            {workerToolLabel(part.tool)}
-                          </span>
-                          {detail && (
-                            <code className="tool-use__detail">{detail}</code>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                  {message.status === 'cancelled' && (
-                    <div className="message__status">Stopped</div>
-                  )}
-                  {message.status === 'error' && (
-                    <div className="message__status">Interrupted</div>
-                  )}
-                </article>
-              ))}
+              <MessageThread
+                assistantLabel="Worker"
+                messages={run.messages}
+                toolLabel={workerToolLabel}
+              />
               {run.error && <div className="error-message">{run.error}</div>}
             </section>
 
