@@ -7,7 +7,8 @@ import {
   useState,
 } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
-import type { DisplayPart, SidebarTask, WorkerRun } from '../claude';
+import type { SidebarTask, WorkerRun } from '../claude';
+import { toolDetail, workerToolLabel } from '../lib/toolLabels';
 import { MarkdownContent } from './MarkdownContent';
 import { Button } from './ui/button';
 import {
@@ -29,53 +30,6 @@ type WorkerScreenProps = {
   onStart: () => void;
   onStop: () => void;
 };
-
-function toolAction(name: string) {
-  const actions: Record<string, string> = {
-    Glob: 'list files',
-    Grep: 'search files',
-    Read: 'read file',
-    Edit: 'edit file',
-    Write: 'write file',
-    Bash: 'run command',
-  };
-  return actions[name] ?? 'use tool';
-}
-
-function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
-  const action = toolAction(tool.name);
-  if (tool.status === 'running') {
-    return `${action[0].toUpperCase()}${action.slice(1)}…`;
-  }
-  if (tool.status === 'cancelled') {
-    return `${action[0].toUpperCase()}${action.slice(1)} stopped`;
-  }
-  if (tool.status === 'error') {
-    return `Could not ${action}`;
-  }
-  const completed: Record<string, string> = {
-    Glob: 'Listed files',
-    Grep: 'Searched files',
-    Read: 'Read file',
-    Edit: 'Edited file',
-    Write: 'Wrote file',
-    Bash: 'Ran command',
-  };
-  return completed[tool.name] ?? 'Used tool';
-}
-
-function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
-  if (!tool.input) {
-    return null;
-  }
-  const value =
-    tool.name === 'Bash'
-      ? tool.input.command
-      : tool.name === 'Glob' || tool.name === 'Grep'
-        ? tool.input.pattern
-        : tool.input.file_path;
-  return typeof value === 'string' ? value : null;
-}
 
 export function WorkerScreen({
   task,
@@ -270,7 +224,7 @@ export function WorkerScreen({
                         >
                           <span className="tool-use__indicator" />
                           <span className="tool-use__label">
-                            {toolLabel(part.tool)}
+                            {workerToolLabel(part.tool)}
                           </span>
                           {detail && (
                             <code className="tool-use__detail">{detail}</code>

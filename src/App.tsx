@@ -13,7 +13,6 @@ import sidebarCollapseIcon from './assets/sidebar-collapse.svg';
 import type {
   ClaudeStreamEvent,
   DisplayMessage,
-  DisplayPart,
   Goal,
   GoalSummary,
   SidebarTask,
@@ -39,6 +38,7 @@ import {
   summaryOf,
   updateAssistant,
 } from './lib/goalState';
+import { plannerToolLabel, toolDetail } from './lib/toolLabels';
 
 function statusLabel(message: DisplayMessage) {
   if (message.status === 'cancelled') {
@@ -50,104 +50,6 @@ function statusLabel(message: DisplayMessage) {
   }
 
   return null;
-}
-
-function toolLabel(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
-  const action =
-    tool.name === 'Glob'
-      ? 'list files'
-      : tool.name === 'Grep'
-        ? 'search files'
-        : tool.name === 'Bash'
-          ? 'run command'
-          : tool.name === 'WebSearch'
-            ? 'search the web'
-            : tool.name === 'WebFetch'
-              ? 'fetch page'
-              : tool.name === 'mcp__rba__update_findings'
-                ? 'update findings'
-                : tool.name === 'mcp__rba__read_findings'
-                  ? 'read findings'
-                  : tool.name === 'mcp__rba__read_tasks'
-                    ? 'read tasks'
-                    : tool.name === 'mcp__rba__add_task'
-                      ? 'draft task'
-                      : tool.name === 'mcp__rba__update_task'
-                        ? 'update task'
-                        : tool.name === 'mcp__rba__remove_task'
-                          ? 'remove task'
-                          : tool.name === 'mcp__rba__commit_tasks'
-                            ? 'queue tasks'
-                            : 'read file';
-
-  if (tool.status === 'running') {
-    return `${action[0].toUpperCase()}${action.slice(1)}…`;
-  }
-
-  if (tool.status === 'cancelled') {
-    return `${action[0].toUpperCase()}${action.slice(1)} stopped`;
-  }
-
-  if (tool.status === 'error') {
-    return `Could not ${action}`;
-  }
-
-  if (tool.name === 'Glob') {
-    return 'Listed files';
-  }
-
-  if (tool.name === 'Grep') {
-    return 'Searched files';
-  }
-
-  if (tool.name === 'Bash') {
-    return 'Ran command';
-  }
-
-  if (tool.name === 'WebSearch') {
-    return 'Searched the web';
-  }
-
-  if (tool.name === 'WebFetch') {
-    return 'Fetched page';
-  }
-
-  if (tool.name === 'mcp__rba__update_findings') {
-    return 'Updated findings';
-  }
-
-  const taskLabels: Record<string, string> = {
-    mcp__rba__read_tasks: 'Read tasks',
-    mcp__rba__add_task: 'Drafted task',
-    mcp__rba__update_task: 'Updated task',
-    mcp__rba__remove_task: 'Removed task',
-    mcp__rba__commit_tasks: 'Queued tasks',
-  };
-  if (taskLabels[tool.name]) {
-    return taskLabels[tool.name];
-  }
-
-  return tool.name === 'mcp__rba__read_findings'
-    ? 'Read findings'
-    : 'Read file';
-}
-
-function toolDetail(tool: Extract<DisplayPart, { type: 'tool' }>['tool']) {
-  if (!tool.input) {
-    return null;
-  }
-
-  const value =
-    tool.name === 'Glob' || tool.name === 'Grep'
-      ? tool.input.pattern
-      : tool.name === 'Bash'
-        ? tool.input.command
-        : tool.name === 'WebSearch'
-          ? tool.input.query
-          : tool.name === 'WebFetch'
-            ? tool.input.url
-            : tool.input.file_path;
-  return typeof value === 'string' ? value : null;
 }
 
 export function App() {
@@ -1054,7 +956,7 @@ export function App() {
                               >
                                 <span className="tool-use__indicator" />
                                 <span className="tool-use__label">
-                                  {toolLabel(tool)}
+                                  {plannerToolLabel(tool)}
                                 </span>
                                 {detail && (
                                   <code className="tool-use__detail">
