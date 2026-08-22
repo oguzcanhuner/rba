@@ -6,13 +6,133 @@ const {
   StdioServerTransport,
 } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
+const { runTestTrace } = require('./test-trace-service');
 
-const MAX_FINDINGS_LENGTH = 500_000;
+const MAX_AUDIT_LENGTH = 500_000;
+const MAX_AUDIT_ARTIFACTS = 200;
 const MAX_TASK_TITLE_LENGTH = 200;
 const MAX_TASK_SPEC_LENGTH = 500_000;
 const TASK_STATUSES = new Set(['draft', 'queued']);
 
-class FindingsRepository {
+class AuditRepository {
+  constructor(filename, goalId) {
+    if (!path.isAbsolute(filename)) {
+      throw new Error('The goal database path must be absolute.');
+    }
+    if (
+      typeof goalId !== 'string' ||
+      goalId.length === 0 ||
+      goalId.length > 100
+    ) {
+      throw new Error('The goal ID is invalid.');
+    }
+
+    this.goalId = goalId;
+    this.database = new DatabaseSync(filename);
+    this.database.exec('PRAGMA busy_timeout = 5000');
+    this.workingDirectory = this.database
+      .prepare(
+        'SELECT working_directory AS workingDirectory FROM goals WHERE id = ?',
+      )
+      .get(this.goalId)?.workingDirectory;
+    this.readStatement = this.database.prepare(`
+      SELECT audit_artifacts_json AS auditArtifactsJson
+      FROM goals
+      WHERE id = ?
+    `);
+    this.updateStatement = this.database.prepare(`
+      UPDATE goals
+      SET audit_artifacts_json = ?, updated_at = ?
+      WHERE id = ?
+    `);
+  }
+
+  read() {
+    const json = this.readStatement.get(this.goalId)?.auditArtifactsJson;
+    const artifacts = json ? JSON.parse(json) : [];
+    return artifacts.flatMap((artifact) => {
+      if (!artifact || typeof artifact.id !== 'string') {
+        return [];
+      }
+      if (artifact.kind === 'test-trace') {
+        return [artifact];
+      }
+      return artifact.kind === 'vitest-trace'
+        ? [{ ...artifact, kind: 'test-trace', framework: 'vitest' }]
+        : [];
+    });
+  }
+
+  remove(id) {
+    const artifacts = this.read();
+    const next = artifacts.filter((artifact) => artifact.id !== id);
+    if (next.length === artifacts.length) {
+      return false;
+    }
+    this.write(next);
+    return true;
+  }
+
+  upsertTestTrace(trace) {
+    const artifacts = this.read();
+    const index = artifacts.findIndex(
+      (artifact) =>
+        artifact.kind === 'test-trace' &&
+        artifact.framework === trace.framework &&
+        artifact.testPath === trace.testPath &&
+        artifact.testName === trace.testName,
+    );
+    const artifact = {
+      id: index === -1 ? randomUUID() : artifacts[index].id,
+      kind: 'test-trace',
+      ...trace,
+    };
+    if (index === -1) {
+      artifacts.push(artifact);
+    } else {
+      artifacts[index] = artifact;
+    }
+    this.write(artifacts);
+    return artifact;
+  }
+
+  readForAgent() {
+    return this.read().map((artifact) => ({
+      id: artifact.id,
+      kind: artifact.kind,
+      framework: artifact.framework,
+      testPath: artifact.testPath,
+      testName: artifact.testName,
+      createdAt: artifact.createdAt,
+      success: artifact.success,
+      assertionCount: artifact.assertions.length,
+    }));
+  }
+
+  write(artifacts) {
+    const json = JSON.stringify(artifacts);
+    if (
+      !Array.isArray(artifacts) ||
+      artifacts.length > MAX_AUDIT_ARTIFACTS ||
+      json.length > MAX_AUDIT_LENGTH
+    ) {
+      throw new Error('The audit artifacts are invalid.');
+    }
+
+    if (
+      this.updateStatement.run(json, new Date().toISOString(), this.goalId)
+        .changes === 0
+    ) {
+      throw new Error('The goal no longer exists.');
+    }
+  }
+
+  close() {
+    this.database.close();
+  }
+}
+
+class PlanRepository {
   constructor(filename, goalId) {
     if (!path.isAbsolute(filename)) {
       throw new Error('The goal database path must be absolute.');
@@ -29,30 +149,14 @@ class FindingsRepository {
     this.database = new DatabaseSync(filename);
     this.database.exec('PRAGMA busy_timeout = 5000');
     this.readStatement = this.database.prepare(`
-      SELECT findings_markdown AS findingsMarkdown
+      SELECT plan_markdown AS planMarkdown
       FROM goals
-      WHERE id = ?
-    `);
-    this.updateStatement = this.database.prepare(`
-      UPDATE goals
-      SET findings_markdown = ?, updated_at = ?
       WHERE id = ?
     `);
   }
 
   read() {
-    return this.readStatement.get(this.goalId)?.findingsMarkdown ?? null;
-  }
-
-  update(markdown) {
-    if (typeof markdown !== 'string' || markdown.length > MAX_FINDINGS_LENGTH) {
-      throw new Error('The findings Markdown is invalid.');
-    }
-
-    return (
-      this.updateStatement.run(markdown, new Date().toISOString(), this.goalId)
-        .changes > 0
-    );
+    return this.readStatement.get(this.goalId)?.planMarkdown ?? null;
   }
 
   close() {
@@ -283,84 +387,78 @@ class TasksRepository {
 }
 
 async function startServer({ databasePath, goalId }) {
-  const repository = new FindingsRepository(databasePath, goalId);
-  const tasks = new TasksRepository(databasePath, goalId);
+  const repository = new AuditRepository(databasePath, goalId);
+  const plan = new PlanRepository(databasePath, goalId);
   const server = new McpServer({ name: 'rba-findings', version: '1.0.0' });
 
   server.registerTool(
-    'read_findings',
+    'read_artifacts',
     {
-      title: 'Read findings',
-      description:
-        "Read the active goal's current findings Markdown before revising it.",
+      title: 'Read audit artifacts',
+      description: "Read the generated test traces in the active goal's audit.",
       annotations: { readOnlyHint: true },
     },
     async () => ({
       content: [
         {
           type: 'text',
-          text: repository.read() ?? '(the findings document is empty)',
+          text: JSON.stringify(repository.readForAgent(), null, 2),
         },
       ],
     }),
   );
 
   server.registerTool(
-    'read_tasks',
+    'read_plan',
     {
-      title: 'Read tasks',
+      title: 'Read plan',
       description:
-        "Read the active goal's current task drafts and queued tasks before revising them.",
+        "Read the user's current plan. This document is user-owned and read-only.",
       annotations: { readOnlyHint: true },
     },
-    async () => {
-      const currentTasks = tasks.list();
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              currentTasks.length === 0
-                ? '(there are no tasks yet)'
-                : JSON.stringify(currentTasks, null, 2),
-          },
-        ],
-      };
-    },
+    async () => ({
+      content: [
+        {
+          type: 'text',
+          text: plan.read() ?? '(the user has not written a plan yet)',
+        },
+      ],
+    }),
   );
 
   server.registerTool(
-    'add_task',
+    'add_test_trace',
     {
-      title: 'Add task',
+      title: 'Run and add test trace',
       description:
-        'Add a durable draft task to the active goal. The draft appears immediately for user review.',
+        'Detect the test framework, run one test file or named test, and add its structured execution result to the audit.',
       inputSchema: {
-        title: z
+        path: z
           .string()
           .min(1)
-          .max(MAX_TASK_TITLE_LENGTH)
-          .describe('A concise task title'),
-        specMarkdown: z
-          .string()
-          .max(MAX_TASK_SPEC_LENGTH)
-          .describe('The complete task specification in Markdown'),
+          .max(4096)
+          .refine(
+            (filePath) =>
+              !path.isAbsolute(filePath) &&
+              !filePath.split(/[\\/]/).includes('..'),
+            'The path must stay within the workspace.',
+          ),
+        testName: z.string().min(1).max(500).optional(),
       },
       annotations: { destructiveHint: false },
     },
-    async ({ title, specMarkdown }) => {
-      const task = tasks.add({ title, specMarkdown });
-      if (!task) {
-        return {
-          content: [{ type: 'text', text: 'The goal no longer exists.' }],
-          isError: true,
-        };
-      }
+    async ({ path: testPath, testName }) => {
+      const trace = await runTestTrace({
+        workingDirectory: repository.workingDirectory,
+        testPath,
+        testName,
+      });
+      const artifact = repository.upsertTestTrace(trace);
       return {
         content: [
           {
             type: 'text',
-            text: `Drafted task #${task.sequence} (${task.id}): ${task.title}`,
+            text: `Added ${artifact.framework} test trace ${artifact.id} (${artifact.assertions.length} test(s)).`,
           },
         ],
       };
@@ -368,110 +466,27 @@ async function startServer({ databasePath, goalId }) {
   );
 
   server.registerTool(
-    'update_task',
+    'remove_artifact',
     {
-      title: 'Update task',
+      title: 'Remove audit artifact',
       description:
-        'Revise the title or complete Markdown spec of an existing draft or queued task. Read tasks first.',
-      inputSchema: {
-        id: z.string().min(1).max(100).describe('The stable task ID'),
-        title: z
-          .string()
-          .min(1)
-          .max(MAX_TASK_TITLE_LENGTH)
-          .optional()
-          .describe('A replacement task title'),
-        specMarkdown: z
-          .string()
-          .max(MAX_TASK_SPEC_LENGTH)
-          .optional()
-          .describe('The complete replacement task specification in Markdown'),
-      },
-      annotations: { destructiveHint: true, idempotentHint: true },
-    },
-    async ({ id, title, specMarkdown }) => {
-      const task = tasks.update(id, { title, specMarkdown });
-      return task
-        ? {
-            content: [
-              { type: 'text', text: `Updated task #${task.sequence}.` },
-            ],
-          }
-        : {
-            content: [{ type: 'text', text: 'The task no longer exists.' }],
-            isError: true,
-          };
-    },
-  );
-
-  server.registerTool(
-    'remove_task',
-    {
-      title: 'Remove task',
-      description:
-        'Remove a draft or queued task from the active goal. Read tasks first.',
-      inputSchema: {
-        id: z.string().min(1).max(100).describe('The stable task ID'),
-      },
+        'Remove an artifact that is no longer relevant. Read artifacts first.',
+      inputSchema: { id: z.string().min(1).max(100) },
       annotations: { destructiveHint: true, idempotentHint: true },
     },
     async ({ id }) =>
-      tasks.remove(id)
-        ? { content: [{ type: 'text', text: 'Task removed.' }] }
+      repository.remove(id)
+        ? { content: [{ type: 'text', text: `Removed artifact ${id}.` }] }
         : {
-            content: [{ type: 'text', text: 'The task no longer exists.' }],
+            content: [{ type: 'text', text: 'The artifact no longer exists.' }],
             isError: true,
           },
-  );
-
-  server.registerTool(
-    'commit_tasks',
-    {
-      title: 'Commit tasks',
-      description:
-        "Promote all of the active goal's draft tasks to queued after the user confirms the breakdown.",
-      annotations: { destructiveHint: true, idempotentHint: true },
-    },
-    async () => {
-      const count = tasks.commit();
-      return {
-        content: [{ type: 'text', text: `Queued ${count} task(s).` }],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_findings',
-    {
-      title: 'Update findings',
-      description:
-        "Replace the active goal's findings with the complete revised Markdown document.",
-      inputSchema: {
-        markdown: z
-          .string()
-          .max(MAX_FINDINGS_LENGTH)
-          .describe('The full findings document in Markdown'),
-      },
-      annotations: { destructiveHint: true, idempotentHint: true },
-    },
-    async ({ markdown }) => {
-      if (!repository.update(markdown)) {
-        return {
-          content: [{ type: 'text', text: 'The goal no longer exists.' }],
-          isError: true,
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: 'Findings updated.' }],
-      };
-    },
   );
 
   const shutdown = async () => {
     await server.close();
     repository.close();
-    tasks.close();
+    plan.close();
   };
   process.once('SIGINT', () => void shutdown());
   process.once('SIGTERM', () => void shutdown());
@@ -490,9 +505,11 @@ if (require.main === module) {
 }
 
 module.exports = {
-  FindingsRepository,
+  AuditRepository,
+  PlanRepository,
   TasksRepository,
-  MAX_FINDINGS_LENGTH,
+  MAX_AUDIT_LENGTH,
+  MAX_AUDIT_ARTIFACTS,
   MAX_TASK_SPEC_LENGTH,
   MAX_TASK_TITLE_LENGTH,
   startServer,

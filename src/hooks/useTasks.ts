@@ -8,7 +8,7 @@ function index(tasks: SidebarTask[]) {
 /**
  * The one client-side copy of the tasks the app knows about. Both lists the UI
  * shows are views over it: the sidebar is every committed task newest first,
- * and the findings pane is the open goal's own tasks in sequence.
+ * and the planning pane is the open goal's own tasks in sequence.
  */
 export function useTasks(activeGoalId: string | null) {
   const [byId, setById] = useState<Record<string, SidebarTask>>({});

@@ -93,6 +93,8 @@ export function App() {
             workingDirectory: cwd,
             agentSession: null,
             findingsMarkdown: null,
+            auditArtifacts: [],
+            planMarkdown: null,
             messages: [userMessage, assistantMessage],
             createdAt: now,
             updatedAt: now,
@@ -318,6 +320,36 @@ export function App() {
     }
   }
 
+  function updatePlan(planMarkdown: string) {
+    setActiveGoal((current) =>
+      current
+        ? {
+            ...current,
+            planMarkdown,
+            updatedAt: new Date().toISOString(),
+          }
+        : current,
+    );
+  }
+
+  async function reviewPlan() {
+    if (
+      !activeGoal?.planMarkdown?.trim() ||
+      !workingDirectory ||
+      activeRequestId
+    ) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await window.goals.save(activeGoal);
+      startGoalRequest('Review my plan.', workingDirectory);
+    } catch {
+      setError('The plan could not be saved for review.');
+    }
+  }
+
   return (
     <main
       className={
@@ -374,6 +406,8 @@ export function App() {
               }
               onCommit={commitTasks}
               onOpenTask={openTask}
+              onPlanChange={updatePlan}
+              onReviewPlan={reviewPlan}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />

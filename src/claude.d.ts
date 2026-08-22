@@ -31,9 +31,9 @@ export type ClaudeStreamEvent =
       tool: { id: string; isError: boolean };
     }
   | {
-      type: 'findings-updated';
+      type: 'audit-updated';
       requestId: string;
-      markdown: string;
+      artifacts: AuditArtifact[];
     }
   | {
       type: 'tasks-updated';
@@ -86,6 +86,28 @@ export type GoalSummary = {
   updatedAt: string;
 };
 
+export type TestTraceAssertion = {
+  name: string;
+  status: string;
+  durationMs: number | null;
+  location: { line: number; column: number } | null;
+  failures: string[];
+};
+
+export type TestTraceArtifact = {
+  id: string;
+  kind: 'test-trace';
+  framework: string;
+  testPath: string;
+  testName: string | null;
+  createdAt: string;
+  success: boolean;
+  durationMs: number;
+  assertions: TestTraceAssertion[];
+};
+
+export type AuditArtifact = TestTraceArtifact;
+
 export type TaskStatus =
   | 'draft'
   | 'queued'
@@ -112,6 +134,8 @@ export type SidebarTask = Task & {
 export type Goal = GoalSummary & {
   agentSession: AgentSession | null;
   findingsMarkdown: string | null;
+  auditArtifacts: AuditArtifact[];
+  planMarkdown: string | null;
   messages: DisplayMessage[];
 };
 

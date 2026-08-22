@@ -14,19 +14,22 @@ export const plannerToolPhrases: Record<string, ToolPhrase> = {
   ...FILE_TOOLS,
   WebSearch: { action: 'search the web', completed: 'Searched the web' },
   WebFetch: { action: 'fetch page', completed: 'Fetched page' },
-  mcp__rba__update_findings: {
-    action: 'update findings',
-    completed: 'Updated findings',
+  mcp__rba__read_artifacts: {
+    action: 'read audit artifacts',
+    completed: 'Read audit artifacts',
   },
-  mcp__rba__read_findings: {
-    action: 'read findings',
-    completed: 'Read findings',
+  mcp__rba__add_test_trace: {
+    action: 'run test trace',
+    completed: 'Added test trace',
   },
-  mcp__rba__read_tasks: { action: 'read tasks', completed: 'Read tasks' },
-  mcp__rba__add_task: { action: 'draft task', completed: 'Drafted task' },
-  mcp__rba__update_task: { action: 'update task', completed: 'Updated task' },
-  mcp__rba__remove_task: { action: 'remove task', completed: 'Removed task' },
-  mcp__rba__commit_tasks: { action: 'queue tasks', completed: 'Queued tasks' },
+  mcp__rba__remove_artifact: {
+    action: 'remove audit artifact',
+    completed: 'Removed audit artifact',
+  },
+  mcp__rba__read_plan: {
+    action: 'read plan',
+    completed: 'Read plan',
+  },
 };
 
 export const workerToolPhrases: Record<string, ToolPhrase> = {
@@ -95,6 +98,8 @@ export function toolDetail(tool: DisplayTool) {
           ? tool.input.query
           : tool.name === 'WebFetch'
             ? tool.input.url
-            : tool.input.file_path;
+            : tool.name === 'mcp__rba__add_test_trace'
+              ? tool.input.path
+              : tool.input.file_path;
   return typeof value === 'string' ? value : null;
 }

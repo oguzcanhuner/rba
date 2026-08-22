@@ -1,5 +1,11 @@
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync } = require('node:fs');
+const {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -8,13 +14,13 @@ const {
   StdioClientTransport,
 } = require('@modelcontextprotocol/sdk/client/stdio.js');
 const {
-  FindingsRepository,
+  AuditRepository,
   TasksRepository,
-  MAX_FINDINGS_LENGTH,
+  MAX_AUDIT_LENGTH,
 } = require('../findings-mcp-server');
 const { GoalStore } = require('../goal-store');
 
-test('findings tools read and update only their goal in SQLite', (t) => {
+test('audit repository upserts test traces for one goal', (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-findings-test-'));
   const filename = path.join(directory, 'goals.sqlite3');
   t.after(() => rmSync(directory, { force: true, recursive: true }));
@@ -22,7 +28,7 @@ test('findings tools read and update only their goal in SQLite', (t) => {
   const store = new GoalStore(filename);
   const base = {
     title: 'Record findings',
-    workingDirectory: '/workspace',
+    workingDirectory: directory,
     agentSession: null,
     findingsMarkdown: null,
     messages: [],
@@ -32,13 +38,49 @@ test('findings tools read and update only their goal in SQLite', (t) => {
   store.save({ ...base, id: 'goal-1' });
   store.save({ ...base, id: 'goal-2' });
 
-  const repository = new FindingsRepository(filename, 'goal-1');
-  assert.equal(repository.read(), null);
-  assert.equal(repository.update('# Findings\n\nA decision.'), true);
-  assert.equal(repository.read(), '# Findings\n\nA decision.');
-  assert.equal(store.get('goal-2').findingsMarkdown, null);
+  const repository = new AuditRepository(filename, 'goal-1');
+  assert.deepEqual(repository.read(), []);
+  const trace = {
+    framework: 'vitest',
+    testPath: 'test/request.test.ts',
+    testName: null,
+    createdAt: '2026-08-17T10:00:00.000Z',
+    success: true,
+    durationMs: 12,
+    assertions: [],
+  };
+  const firstTrace = repository.upsertTestTrace(trace);
+  const refreshedTrace = repository.upsertTestTrace({
+    ...trace,
+    createdAt: '2026-08-17T10:01:00.000Z',
+  });
+  assert.equal(refreshedTrace.id, firstTrace.id);
+  assert.equal(repository.read().length, 1);
+  assert.equal(repository.read()[0].createdAt, '2026-08-17T10:01:00.000Z');
+  assert.deepEqual(repository.readForAgent(), [
+    {
+      id: firstTrace.id,
+      kind: 'test-trace',
+      framework: 'vitest',
+      testPath: 'test/request.test.ts',
+      testName: null,
+      createdAt: '2026-08-17T10:01:00.000Z',
+      success: true,
+      assertionCount: 0,
+    },
+  ]);
+  assert.equal(repository.remove(firstTrace.id), true);
+  assert.deepEqual(repository.read(), []);
+  assert.deepEqual(store.get('goal-2').auditArtifacts, []);
   assert.throws(
-    () => repository.update('x'.repeat(MAX_FINDINGS_LENGTH + 1)),
+    () =>
+      repository.write([
+        {
+          id: 'too-large',
+          kind: 'test-trace',
+          testPath: 'x'.repeat(MAX_AUDIT_LENGTH + 1),
+        },
+      ]),
     /invalid/,
   );
 
@@ -109,18 +151,59 @@ test('task repository isolates goals and preserves stable task identity', (t) =>
   reopened.close();
 });
 
-test('serves read_findings and update_findings over MCP stdio', async (t) => {
+test('serves audit tools and a read-only plan over MCP stdio', async (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-findings-mcp-test-'));
   const filename = path.join(directory, 'goals.sqlite3');
   t.after(() => rmSync(directory, { force: true, recursive: true }));
 
   const store = new GoalStore(filename);
+  mkdirSync(path.join(directory, 'test'));
+  const executable = path.join(directory, 'node_modules', '.bin', 'vitest');
+  mkdirSync(path.dirname(executable), { recursive: true });
+  writeFileSync(
+    path.join(directory, 'package.json'),
+    JSON.stringify({ devDependencies: { vitest: '^2.1.0' } }),
+  );
+  writeFileSync(path.join(directory, 'test', 'feature.test.js'), 'test');
+  const report = JSON.stringify({
+    success: true,
+    startTime: Date.now() - 5,
+    testResults: [
+      {
+        assertionResults: [
+          {
+            fullName: 'feature works',
+            status: 'passed',
+            duration: 3,
+            failureMessages: [],
+            location: { line: 2, column: 1 },
+          },
+        ],
+      },
+    ],
+  });
+  writeFileSync(
+    executable,
+    [
+      '#!/bin/sh',
+      'for arg in "$@"; do',
+      '  case "$arg" in',
+      '    --outputFile=*) output="$' + '{arg#--outputFile=}" ;;',
+      '  esac',
+      'done',
+      `printf '%s' '${report}' > "$output"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(executable, 0o755);
   store.save({
     id: 'goal-1',
     title: 'Record findings',
-    workingDirectory: '/workspace',
+    workingDirectory: directory,
     agentSession: null,
     findingsMarkdown: null,
+    auditArtifacts: [],
+    planMarkdown: '# Plan\n\nKeep ownership with the user.',
     tasks: [],
     messages: [],
     createdAt: '2026-08-09T10:00:00.000Z',
@@ -145,57 +228,64 @@ test('serves read_findings and update_findings over MCP stdio', async (t) => {
 
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'add_task',
-    'commit_tasks',
-    'read_findings',
-    'read_tasks',
-    'remove_task',
-    'update_findings',
-    'update_task',
+    'add_test_trace',
+    'read_artifacts',
+    'read_plan',
+    'remove_artifact',
   ]);
   assert.equal(
-    tools.tools.find((tool) => tool.name === 'update_findings')?.annotations
+    tools.tools.find((tool) => tool.name === 'add_test_trace')?.annotations
       ?.destructiveHint,
-    true,
+    false,
   );
 
-  const empty = await client.callTool({ name: 'read_findings' });
-  assert.equal(empty.content[0].text, '(the findings document is empty)');
-
-  const updated = await client.callTool({
-    name: 'update_findings',
-    arguments: { markdown: '# Findings\n\nUpdated through MCP.' },
-  });
-  assert.equal(updated.isError, undefined);
-  assert.equal(
-    store.get('goal-1').findingsMarkdown,
-    '# Findings\n\nUpdated through MCP.',
-  );
+  const empty = await client.callTool({ name: 'read_artifacts' });
+  assert.equal(empty.content[0].text, '[]');
 
   const added = await client.callTool({
-    name: 'add_task',
-    arguments: {
-      title: 'Persist tasks',
-      specMarkdown: '## Goal\n\nPersist task records.',
-    },
+    name: 'add_test_trace',
+    arguments: { path: 'test/feature.test.js' },
   });
   assert.equal(added.isError, undefined);
+  const [storedArtifact] = store.get('goal-1').auditArtifacts;
+  assert.equal(storedArtifact.kind, 'test-trace');
+  assert.equal(storedArtifact.framework, 'vitest');
+  assert.equal(storedArtifact.testPath, 'test/feature.test.js');
+  assert.equal(storedArtifact.testName, null);
+  assert.equal(storedArtifact.success, true);
+  assert.deepEqual(storedArtifact.assertions, [
+    {
+      name: 'feature works',
+      status: 'passed',
+      durationMs: 3,
+      location: { line: 2, column: 1 },
+      failures: [],
+    },
+  ]);
 
-  const tasks = store.get('goal-1').tasks;
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0].status, 'draft');
+  const listed = JSON.parse(
+    (await client.callTool({ name: 'read_artifacts' })).content[0].text,
+  );
+  assert.deepEqual(listed, [
+    {
+      id: storedArtifact.id,
+      kind: 'test-trace',
+      framework: 'vitest',
+      testPath: 'test/feature.test.js',
+      testName: null,
+      createdAt: storedArtifact.createdAt,
+      success: true,
+      assertionCount: 1,
+    },
+  ]);
 
-  const read = await client.callTool({ name: 'read_tasks' });
-  assert.match(read.content[0].text, /Persist tasks/);
-
-  const taskId = tasks[0].id;
-  await client.callTool({
-    name: 'update_task',
-    arguments: { id: taskId, title: 'Persist durable tasks' },
+  const removed = await client.callTool({
+    name: 'remove_artifact',
+    arguments: { id: storedArtifact.id },
   });
-  await client.callTool({ name: 'commit_tasks' });
-  assert.equal(store.get('goal-1').tasks[0].status, 'queued');
+  assert.equal(removed.isError, undefined);
+  assert.deepEqual(store.get('goal-1').auditArtifacts, []);
 
-  await client.callTool({ name: 'remove_task', arguments: { id: taskId } });
-  assert.deepEqual(store.get('goal-1').tasks, []);
+  const plan = await client.callTool({ name: 'read_plan' });
+  assert.equal(plan.content[0].text, '# Plan\n\nKeep ownership with the user.');
 });

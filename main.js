@@ -66,6 +66,51 @@ function isValidStartRequest(request) {
 }
 
 function isValidGoal(goal) {
+  const auditArtifactsJson = Array.isArray(goal?.auditArtifacts)
+    ? JSON.stringify(goal.auditArtifacts)
+    : '';
+  const validAuditArtifacts =
+    Array.isArray(goal?.auditArtifacts) &&
+    goal.auditArtifacts.length <= 200 &&
+    auditArtifactsJson.length <= 500_000 &&
+    goal.auditArtifacts.every(
+      (artifact) =>
+        artifact &&
+        typeof artifact.id === 'string' &&
+        artifact.id.length > 0 &&
+        artifact.id.length <= 100 &&
+        artifact.kind === 'test-trace' &&
+        typeof artifact.framework === 'string' &&
+        artifact.framework.length > 0 &&
+        artifact.framework.length <= 100 &&
+        typeof artifact.testPath === 'string' &&
+        artifact.testPath.length > 0 &&
+        artifact.testPath.length <= 4096 &&
+        (artifact.testName === null ||
+          (typeof artifact.testName === 'string' &&
+            artifact.testName.length <= 500)) &&
+        typeof artifact.createdAt === 'string' &&
+        typeof artifact.success === 'boolean' &&
+        Number.isFinite(artifact.durationMs) &&
+        Array.isArray(artifact.assertions) &&
+        artifact.assertions.length <= 10_000 &&
+        artifact.assertions.every(
+          (assertion) =>
+            assertion &&
+            typeof assertion.name === 'string' &&
+            assertion.name.length <= 2_000 &&
+            typeof assertion.status === 'string' &&
+            assertion.status.length <= 100 &&
+            (assertion.durationMs === null ||
+              Number.isFinite(assertion.durationMs)) &&
+            Array.isArray(assertion.failures) &&
+            assertion.failures.length <= 100 &&
+            assertion.failures.every(
+              (failure) =>
+                typeof failure === 'string' && failure.length <= 20_000,
+            ),
+        ),
+    );
   const validSession =
     goal?.agentSession === null ||
     (goal?.agentSession &&
@@ -98,6 +143,10 @@ function isValidGoal(goal) {
       (goal.findingsMarkdown === null ||
         (typeof goal.findingsMarkdown === 'string' &&
           goal.findingsMarkdown.length <= 500_000)) &&
+      (goal.planMarkdown === null ||
+        (typeof goal.planMarkdown === 'string' &&
+          goal.planMarkdown.length <= 500_000)) &&
+      validAuditArtifacts &&
       validSession &&
       // Tasks are deliberately not validated here: a goal save never writes a
       // task row, so the renderer does not send them.
@@ -207,12 +256,9 @@ async function startClaudeRequest(event, request) {
     }
 
     const toolNames = new Map();
-    const pendingFindings = new Map();
-    const taskMutationTools = new Set([
-      'mcp__rba__add_task',
-      'mcp__rba__update_task',
-      'mcp__rba__remove_task',
-      'mcp__rba__commit_tasks',
+    const artifactMutationTools = new Set([
+      'mcp__rba__add_test_trace',
+      'mcp__rba__remove_artifact',
     ]);
     const stream = beginClaudeCli({
       prompt: request.prompt,
@@ -242,28 +288,18 @@ async function startClaudeRequest(event, request) {
       },
       onToolInput: (tool) => {
         const toolName = toolNames.get(tool.id);
-        if (
-          toolName === 'mcp__rba__update_findings' &&
-          typeof tool.input?.markdown === 'string' &&
-          tool.input.markdown.length <= 500_000
-        ) {
-          pendingFindings.set(tool.id, tool.input.markdown);
-        }
         sendClaudeEvent(event.sender, {
           type: 'tool-input',
           requestId: request.requestId,
           tool: {
             ...tool,
-            input:
-              toolName === 'mcp__rba__update_findings'
-                ? {}
-                : taskMutationTools.has(toolName)
-                  ? Object.fromEntries(
-                      Object.entries(tool.input ?? {}).filter(
-                        ([key]) => key !== 'specMarkdown',
-                      ),
-                    )
-                  : relativeToolInput(tool.input, cwd),
+            input: artifactMutationTools.has(toolName)
+              ? Object.fromEntries(
+                  Object.entries(tool.input ?? {}).filter(
+                    ([key]) => key !== 'content',
+                  ),
+                )
+              : relativeToolInput(tool.input, cwd),
           },
         });
       },
@@ -273,22 +309,16 @@ async function startClaudeRequest(event, request) {
           requestId: request.requestId,
           tool,
         });
-        const markdown = pendingFindings.get(tool.id);
-        if (!tool.isError && markdown !== undefined) {
+        if (
+          !tool.isError &&
+          artifactMutationTools.has(toolNames.get(tool.id))
+        ) {
           sendClaudeEvent(event.sender, {
-            type: 'findings-updated',
+            type: 'audit-updated',
             requestId: request.requestId,
-            markdown,
+            artifacts: goalStore.get(request.goalId)?.auditArtifacts ?? [],
           });
         }
-        if (!tool.isError && taskMutationTools.has(toolNames.get(tool.id))) {
-          sendClaudeEvent(event.sender, {
-            type: 'tasks-updated',
-            requestId: request.requestId,
-            tasks: goalStore.listTasks(request.goalId),
-          });
-        }
-        pendingFindings.delete(tool.id);
         toolNames.delete(tool.id);
       },
     });

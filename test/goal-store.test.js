@@ -13,6 +13,8 @@ function goal(overrides = {}) {
     workingDirectory: '/workspace',
     agentSession: null,
     findingsMarkdown: null,
+    auditArtifacts: [],
+    planMarkdown: null,
     tasks: [],
     messages: [
       {
@@ -122,6 +124,43 @@ test('persists findings as part of a goal', () => {
   store.close();
 });
 
+test('persists the user-authored plan as part of a goal', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal({ planMarkdown: '# Plan\n\n1. Make the smallest change.' }));
+
+  assert.equal(
+    store.get('goal-1').planMarkdown,
+    '# Plan\n\n1. Make the smallest change.',
+  );
+  store.close();
+});
+
+test('loads test traces without exposing legacy file artifacts', () => {
+  const store = new GoalStore(':memory:');
+  const testTrace = {
+    id: 'trace-1',
+    kind: 'test-trace',
+    framework: 'vitest',
+    testPath: 'test/feature.test.ts',
+    testName: null,
+    createdAt: '2026-08-17T10:00:00.000Z',
+    success: true,
+    durationMs: 5,
+    assertions: [],
+  };
+  store.save(
+    goal({
+      auditArtifacts: [
+        { id: 'file-1', kind: 'file', path: 'src/feature.ts' },
+        testTrace,
+      ],
+    }),
+  );
+
+  assert.deepEqual(store.get('goal-1').auditArtifacts, [testTrace]);
+  store.close();
+});
+
 test('lists tasks with stable sequence order and commits drafts', () => {
   const store = new GoalStore(':memory:');
   store.save(goal());
@@ -214,7 +253,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 6, 7],
   );
   store.close();
 });
@@ -247,6 +286,8 @@ test('repairs a missing findings column even when migration 2 is marked complete
 
   const store = new GoalStore(filename);
   assert.equal(store.get('existing').findingsMarkdown, null);
+  assert.deepEqual(store.get('existing').auditArtifacts, []);
+  assert.equal(store.get('existing').planMarkdown, null);
   assert.equal(
     store.database
       .prepare('PRAGMA table_info(goals)')
@@ -259,7 +300,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 6, 7],
   );
   store.close();
 });

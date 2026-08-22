@@ -67,11 +67,15 @@ test('streams text from Claude CLI JSON output', async () => {
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /do not ask permission before updating findings/,
+    /do not ask permission before updating the audit/,
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /Skip an update only when the turn produced no durable new understanding/,
+    /Skip an update only when the turn produced no relevant tests/,
+  );
+  assert.match(
+    invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
+    /smallest set of tests that directly describe current observable behavior/,
   );
   assert.equal(
     invocation.args[invocation.args.indexOf('--allowedTools') + 1],
@@ -79,13 +83,10 @@ test('streams text from Claude CLI JSON output', async () => {
       'Bash',
       'WebSearch',
       'WebFetch',
-      'mcp__rba__read_findings',
-      'mcp__rba__update_findings',
-      'mcp__rba__read_tasks',
-      'mcp__rba__add_task',
-      'mcp__rba__update_task',
-      'mcp__rba__remove_task',
-      'mcp__rba__commit_tasks',
+      'mcp__rba__read_artifacts',
+      'mcp__rba__add_test_trace',
+      'mcp__rba__remove_artifact',
+      'mcp__rba__read_plan',
     ].join(','),
   );
   const mcpConfig = JSON.parse(
