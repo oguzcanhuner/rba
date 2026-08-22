@@ -3,6 +3,15 @@ const path = require('node:path');
 
 const DECLARATIONS = `
 declare module '@rba/workflow' {
+  export type TaskInput = {
+    task: {
+      id: string;
+      title: string;
+      spec: string;
+      workingDirectory: string;
+      workspace: string;
+    };
+  };
   export type CommandResult = {
     ok: boolean;
     exitCode: number | null;
@@ -22,10 +31,12 @@ declare module '@rba/workflow' {
       session?: string;
       includeDiff?: boolean;
       timeoutMs?: number;
+      mode?: 'read' | 'write';
     }): Promise<{ sessionId: string; text: string }>;
-    human<T = unknown>(id: string, options: {
+    human<T = { action: string; response: string | null }>(id: string, options: {
       title: string;
       description?: string;
+      actions?: Array<{ id: string; label: string }>;
     }): Promise<T>;
     sleep(id: string, options: { milliseconds: number }): Promise<void>;
     workflow<ChildInput, ChildOutput>(
@@ -34,7 +45,7 @@ declare module '@rba/workflow' {
       input: ChildInput,
     ): Promise<ChildOutput>;
   };
-  export function workflow<Input = unknown, Output = unknown>(definition: {
+  export function workflow<Input = TaskInput, Output = unknown>(definition: {
     id: string;
     run(context: WorkflowContext<Input>): Promise<Output>;
   }): { id: string; run(context: WorkflowContext<Input>): Promise<Output> };
@@ -44,18 +55,38 @@ declare module '@rba/workflow' {
 const STARTER = `import { workflow } from '@rba/workflow';
 
 export default workflow({
-  id: 'implement',
+  id: 'implement-review',
 
   async run(ctx) {
-    await ctx.agent('implement', {
-      session: 'implementer',
-      prompt: \`Implement this task autonomously and then stop.\n\n# Task\n\n\${ctx.task.title}\n\n\${ctx.task.spec}\`,
-    });
+    let prompt = \`Implement this task autonomously and then stop.\n\n# Task\n\n\${ctx.task.title}\n\n\${ctx.task.spec}\`;
 
-    return ctx.human('approval', {
-      title: 'Review implementation',
-      description: 'Inspect the diff and approve or return a note to the workflow.',
-    });
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await ctx.agent(\`implement:\${attempt}\`, {
+        session: 'implementer',
+        prompt,
+      });
+
+      const review = await ctx.agent(\`review:\${attempt}\`, {
+        session: 'reviewer',
+        mode: 'read',
+        includeDiff: true,
+        prompt: 'Review the implementation against the task. Identify only material correctness, scope, and verification issues.',
+      });
+
+      const decision = await ctx.human(\`decision:\${attempt}\`, {
+        title: 'Review implementation',
+        description: review.text,
+        actions: [
+          { id: 'approve', label: 'Approve' },
+          { id: 'revise', label: 'Request revision' },
+        ],
+      });
+
+      if (decision.action === 'approve') return decision;
+      prompt = \`Revise the implementation using this review:\n\n\${review.text}\n\nUser note:\n\${decision.response ?? '(none)'}\`;
+    }
+
+    throw new Error('The workflow reached its three-attempt revision limit.');
   },
 });
 `;

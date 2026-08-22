@@ -266,3 +266,33 @@ test('starts an autonomous worker with write and command tools', async () => {
     sessionId: 'worker-session',
   });
 });
+
+test('starts a read-only review agent without editing tools', async () => {
+  const child = fakeProcess();
+  let args;
+  const response = beginWorkerCli({
+    prompt: 'Review the diff',
+    cwd: '/worktree',
+    mode: 'read',
+    onText: () => {},
+    spawnProcess: (_command, receivedArgs) => {
+      args = receivedArgs;
+      return child;
+    },
+  });
+
+  assert.equal(args[args.indexOf('--tools') + 1], 'Glob,Grep,Read,Bash');
+  assert.match(
+    args[args.indexOf('--append-system-prompt') + 1],
+    /without changing files/,
+  );
+  child.stdout.write(
+    `${JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      session_id: 'review-session',
+    })}\n`,
+  );
+  child.emit('close', 0);
+  assert.deepEqual(await response.completion, { sessionId: 'review-session' });
+});

@@ -196,6 +196,7 @@ class WorkflowService {
           error: existing.error,
         });
       } else if (message.operationType === 'human') {
+        this.validateHumanInput(message.input);
         this.store.startOperation(
           runId,
           message.key,
@@ -217,6 +218,34 @@ class WorkflowService {
       }
     } catch (error) {
       this.rejectOperation(runId, host, message, error);
+    }
+  }
+
+  validateHumanInput(input) {
+    if (
+      !input ||
+      typeof input.title !== 'string' ||
+      !input.title.trim() ||
+      input.title.length > 200 ||
+      (input.description !== undefined &&
+        (typeof input.description !== 'string' ||
+          input.description.length > 20_000)) ||
+      (input.actions !== undefined &&
+        (!Array.isArray(input.actions) ||
+          input.actions.length === 0 ||
+          input.actions.length > 10 ||
+          input.actions.some(
+            (action) =>
+              !action ||
+              typeof action.id !== 'string' ||
+              !action.id ||
+              action.id.length > 100 ||
+              typeof action.label !== 'string' ||
+              !action.label ||
+              action.label.length > 100,
+          )))
+    ) {
+      throw new Error('Human operations require a valid title and actions.');
     }
   }
 
@@ -283,6 +312,12 @@ class WorkflowService {
     ) {
       throw new Error('Agent timeoutMs must be between 1 and 86400000.');
     }
+    if (
+      options.mode !== undefined &&
+      !['read', 'write'].includes(options.mode)
+    ) {
+      throw new Error('Agent mode must be `read` or `write`.');
+    }
     const diff = options.includeDiff
       ? (await this.getDiff(run.taskId)).patch
       : null;
@@ -322,6 +357,7 @@ class WorkflowService {
     runtime.stream = this.beginAgent({
       prompt,
       sessionId,
+      mode: options.mode,
       cwd: run.worktree,
       onText: (text) => {
         runtime.text += text;

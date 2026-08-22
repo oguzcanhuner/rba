@@ -1834,6 +1834,12 @@
   margin: 0;
 }
 
+.workflow-human__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .workflow-command code,
 .workflow-command pre,
 .workflow-operation-detail pre {

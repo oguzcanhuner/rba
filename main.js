@@ -562,11 +562,13 @@ ipcMain.handle('workflows:start', async (event, taskId, sourcePath) => {
 });
 
 ipcMain.handle('workflows:resolve', (event, runId, key, value) => {
+  const serialized = JSON.stringify(value);
   if (
     !isTrustedSender(event.senderFrame) ||
     !validShortId(runId) ||
     !validShortId(key) ||
-    JSON.stringify(value).length > 100_000
+    typeof serialized !== 'string' ||
+    serialized.length > 100_000
   ) {
     throw new Error('Invalid workflow input.');
   }

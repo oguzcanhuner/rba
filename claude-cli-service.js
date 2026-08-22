@@ -13,12 +13,12 @@ The plan is authored only by the user in the application. You have no tool that 
 You may use Bash and web search to investigate the codebase and gather context (for example running git, inspecting history, or analysing files). Do not modify files or make any other changes to the repository, and do not claim implementation has been completed.`;
 }
 
-function workerPrompt() {
-  return `You are an autonomous implementation worker. Complete the task you are given in the current git worktree.
+function workerPrompt(mode = 'write') {
+  return `You are an autonomous ${mode === 'read' ? 'review' : 'implementation'} worker. ${mode === 'read' ? 'Inspect the task and current git worktree, then return the requested assessment without changing files.' : 'Complete the task you are given in the current git worktree.'}
 
-Read the repository instructions and existing code before changing anything. Keep the work scoped to the task, implement it fully, and run the relevant automated checks. You may edit files and run commands inside the worktree. Do not push branches, create merge requests, or modify anything outside the worktree.
+Read the repository instructions and existing code before ${mode === 'read' ? 'forming your assessment' : 'changing anything'}. Keep the work scoped to the task.${mode === 'read' ? ' You may inspect files and run read-only commands.' : ' Implement it fully and run the relevant automated checks. You may edit files and run commands inside the worktree.'} Do not push branches, create merge requests, or modify anything outside the worktree.
 
-Work independently until the task is complete. If you cannot continue safely, explain the blocker clearly and stop. End with a concise summary of what you changed and the checks you ran.`;
+Work independently until the request is complete. If you cannot continue safely, explain the blocker clearly and stop. End with a concise ${mode === 'read' ? 'assessment' : 'summary of what you changed and the checks you ran'}.`;
 }
 
 class ClaudeCliError extends Error {
@@ -261,12 +261,14 @@ function beginClaudeCli(options) {
 }
 
 function beginWorkerCli(options) {
-  const workerTools = ['Glob', 'Grep', 'Read', 'Edit', 'Write', 'Bash'].join(
-    ',',
-  );
+  const mode = options.mode === 'read' ? 'read' : 'write';
+  const workerTools =
+    mode === 'read'
+      ? ['Glob', 'Grep', 'Read', 'Bash'].join(',')
+      : ['Glob', 'Grep', 'Read', 'Edit', 'Write', 'Bash'].join(',');
   return beginClaudeProcess({
     ...options,
-    systemPrompt: workerPrompt(),
+    systemPrompt: workerPrompt(mode),
     tools: workerTools,
     allowedTools: workerTools,
   });

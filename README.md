@@ -62,12 +62,15 @@ export default workflow({
 ### Runtime operations
 
 - `ctx.agent(id, options)` starts or resumes a named Claude session in the
-  task's isolated Git worktree. It returns the session ID and final text.
+  task's isolated Git worktree. It returns the session ID and final text. Set
+  `mode: 'read'` for an independent reviewer without file-writing tools, and
+  `includeDiff: true` to append the current diff to its prompt.
 - `ctx.command(id, options)` executes an argument-array command in the worktree
   and returns its exit status, stdout, and stderr. A non-zero exit is a normal
   `{ ok: false }` result, so the script controls its route.
 - `ctx.human(id, options)` durably suspends the run until the user responds in
-  RBA.
+  RBA. Scripts may declare named `actions`; the result contains the selected
+  `action` and optional written `response`, so normal code can branch on it.
 - `ctx.sleep(id, options)` creates a bounded durable delay.
 - `ctx.workflow(id, definition, input)` composes another imported workflow and
   namespaces its operation IDs.

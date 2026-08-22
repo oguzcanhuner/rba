@@ -86,6 +86,14 @@ function OperationDetail({
     );
   }
   if (operation.type === 'human' && operation.status === 'waiting') {
+    const actions = Array.isArray(operation.input.actions)
+      ? (
+          operation.input.actions as Array<{ id: string; label: string }>
+        ).filter(
+          (action) =>
+            typeof action.id === 'string' && typeof action.label === 'string',
+        )
+      : [{ id: 'continue', label: 'Continue workflow' }];
     return (
       <div className="workflow-human">
         <h3>{operationTitle(operation)}</h3>
@@ -98,17 +106,23 @@ function OperationDetail({
           value={response}
           onChange={(event) => setResponse(event.target.value)}
         />
-        <Button
-          type="button"
-          onClick={() =>
-            onResolve(operation.key, {
-              approved: true,
-              response: response.trim() || null,
-            })
-          }
-        >
-          Continue workflow
-        </Button>
+        <div className="workflow-human__actions">
+          {actions.map((action) => (
+            <Button
+              type="button"
+              variant={action.id === 'reject' ? 'secondary' : 'default'}
+              key={action.id}
+              onClick={() =>
+                onResolve(operation.key, {
+                  action: action.id,
+                  response: response.trim() || null,
+                })
+              }
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
       </div>
     );
   }
