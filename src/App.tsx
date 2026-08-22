@@ -15,10 +15,10 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable';
-import { WorkerScreen } from './components/WorkerScreen';
+import { WorkflowScreen } from './components/WorkflowScreen';
 import { useGoalStream } from './hooks/useGoalStream';
 import { useTasks } from './hooks/useTasks';
-import { useWorkerRuns } from './hooks/useWorkerRuns';
+import { useWorkflowRuns } from './hooks/useWorkflowRuns';
 import {
   byNewestCreation,
   goalTitle,
@@ -150,15 +150,16 @@ export function App() {
 
   const {
     activeTask,
-    activeWorker,
-    diff: workerDiff,
+    activeRun,
+    definitions: workflowDefinitions,
+    diff: workflowDiff,
     startingTaskId,
-    close: closeWorker,
+    close: closeWorkflow,
     open: openTask,
-    start: startWorker,
-    stop: stopWorker,
-    send: sendWorkerMessage,
-  } = useWorkerRuns({ setTaskStatus: tasks.setStatus, setError });
+    start: startWorkflow,
+    stop: stopWorkflow,
+    resolve: resolveWorkflow,
+  } = useWorkflowRuns({ setTaskStatus: tasks.setStatus, setError });
 
   useEffect(() => {
     let disposed = false;
@@ -259,7 +260,7 @@ export function App() {
         await persistCurrentGoal();
         setWorkingDirectory(directory);
         setActiveGoal(null);
-        closeWorker();
+        closeWorkflow();
         setDraft('');
         setError(null);
       }
@@ -280,7 +281,7 @@ export function App() {
       if (goal) {
         const restored = openGoal(goal);
         setWorkingDirectory(restored.workingDirectory);
-        closeWorker();
+        closeWorkflow();
         setDraft('');
         setError(null);
       }
@@ -297,7 +298,7 @@ export function App() {
     try {
       await persistCurrentGoal();
       setActiveGoal(null);
-      closeWorker();
+      closeWorkflow();
       setDraft('');
       setError(null);
     } catch {
@@ -375,19 +376,20 @@ export function App() {
       )}
 
       {activeTask ? (
-        <WorkerScreen
+        <WorkflowScreen
           task={activeTask}
-          run={activeWorker}
-          diff={workerDiff}
+          run={activeRun}
+          definitions={workflowDefinitions}
+          diff={workflowDiff}
           error={error}
           isStarting={startingTaskId === activeTask.id}
           onBack={() => {
-            closeWorker();
+            closeWorkflow();
             setError(null);
           }}
-          onStart={() => startWorker(activeTask)}
-          onSend={sendWorkerMessage}
-          onStop={stopWorker}
+          onStart={(sourcePath) => startWorkflow(activeTask, sourcePath)}
+          onResolve={resolveWorkflow}
+          onStop={stopWorkflow}
         />
       ) : (
         <ResizablePanelGroup

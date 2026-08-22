@@ -5,11 +5,16 @@ const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
 const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
+const { listWorkflows } = require('./workflow-discovery');
+const { WorkflowService } = require('./workflow-service');
+const { WorkflowStore } = require('./workflow-store');
 
 const activeRequests = new Map();
 let goalStore;
 let goalDatabase;
 let workerService;
+let workflowService;
+let workflowStore;
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
@@ -21,6 +26,17 @@ function broadcastWorker(run) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) {
       window.webContents.send('workers:event', { type: 'worker-updated', run });
+    }
+  }
+}
+
+function broadcastWorkflow(run) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send('workflows:event', {
+        type: 'workflow-updated',
+        run,
+      });
     }
   }
 }
@@ -508,6 +524,69 @@ ipcMain.handle('workers:diff', (event, taskId) => {
   return workerService.getDiff(taskId);
 });
 
+function validShortId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 200;
+}
+
+ipcMain.handle('workflows:list', async (event, taskId) => {
+  if (!isTrustedSender(event.senderFrame) || !validShortId(taskId)) {
+    throw new Error('Invalid workflow request.');
+  }
+  const task = goalStore.getTaskForWorker(taskId);
+  if (!task) throw new Error('The task no longer exists.');
+  return listWorkflows(task.workingDirectory);
+});
+
+ipcMain.handle('workflows:get', (event, taskId) => {
+  if (!isTrustedSender(event.senderFrame) || !validShortId(taskId)) {
+    throw new Error('Invalid workflow request.');
+  }
+  return workflowService.get(taskId);
+});
+
+ipcMain.handle('workflows:start', async (event, taskId, sourcePath) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    !validShortId(taskId) ||
+    typeof sourcePath !== 'string'
+  ) {
+    throw new Error('Invalid workflow request.');
+  }
+  const task = goalStore.getTaskForWorker(taskId);
+  if (!task) throw new Error('The task no longer exists.');
+  const workflows = await listWorkflows(task.workingDirectory);
+  if (!workflows.some((workflow) => workflow.path === sourcePath)) {
+    throw new Error('The selected workflow is outside this project.');
+  }
+  return workflowService.start(taskId, sourcePath);
+});
+
+ipcMain.handle('workflows:resolve', (event, runId, key, value) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    !validShortId(runId) ||
+    !validShortId(key) ||
+    JSON.stringify(value).length > 100_000
+  ) {
+    throw new Error('Invalid workflow input.');
+  }
+  return workflowService.resolveHuman(runId, key, value);
+});
+
+ipcMain.handle('workflows:stop', (event, runId) => {
+  if (!isTrustedSender(event.senderFrame) || !validShortId(runId)) {
+    throw new Error('Invalid workflow request.');
+  }
+  return workflowService.stop(runId);
+});
+
+ipcMain.handle('workflows:diff', (event, taskId) => {
+  if (!isTrustedSender(event.senderFrame) || !validShortId(taskId)) {
+    throw new Error('Invalid workflow request.');
+  }
+  return workflowService.getDiff(taskId);
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
@@ -539,10 +618,21 @@ app.whenReady().then(() => {
   goalDatabase = path.join(app.getPath('userData'), 'goals.sqlite3');
   goalStore = new GoalStore(goalDatabase);
   goalStore.interruptWorkingRuns();
+  workflowStore = new WorkflowStore(goalStore.database);
+  workflowStore.interruptRunningRuns();
   workerService = new WorkerService({
     store: goalStore,
     worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
     onUpdate: broadcastWorker,
+  });
+  workflowService = new WorkflowService({
+    store: workflowStore,
+    taskStore: goalStore,
+    worktreesDirectory: path.join(
+      app.getPath('userData'),
+      'workflow-worktrees',
+    ),
+    onUpdate: broadcastWorkflow,
   });
   createWindow();
 
@@ -554,6 +644,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  workflowService?.shutdown();
   workerService?.shutdown();
   goalStore?.close();
 });

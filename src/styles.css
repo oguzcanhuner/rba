@@ -1717,6 +1717,139 @@
   font-size: 0.8125rem;
 }
 
+.workflow-picker {
+  display: grid;
+  gap: 10px;
+  margin: 24px 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.workflow-picker h2,
+.workflow-picker p {
+  margin: 0;
+}
+
+.workflow-picker__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-panel {
+  display: grid;
+  min-width: 0;
+  height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  background: var(--background);
+}
+
+.workflow-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-panel__header h2 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.workflow-timeline {
+  max-height: 38%;
+  overflow-y: auto;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-timeline__item {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workflow-timeline__item:hover,
+.workflow-timeline__item[aria-current="step"] {
+  background: var(--accent);
+}
+
+.workflow-timeline__item small {
+  grid-column: 2;
+  color: var(--muted-foreground);
+}
+
+.workflow-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+}
+
+.workflow-dot--completed {
+  background: oklch(0.72 0.16 145);
+}
+
+.workflow-dot--running {
+  background: oklch(0.73 0.15 75);
+}
+
+.workflow-dot--waiting {
+  background: oklch(0.7 0.15 250);
+}
+
+.workflow-dot--failed {
+  background: var(--destructive);
+}
+
+.workflow-panel__detail,
+.workflow-operation-detail {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.workflow-panel__detail {
+  padding: 12px;
+}
+
+.workflow-human,
+.workflow-command {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-human h3,
+.workflow-human p {
+  margin: 0;
+}
+
+.workflow-command code,
+.workflow-command pre,
+.workflow-operation-detail pre {
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.workflow-empty {
+  color: var(--muted-foreground);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tool-use--running .tool-use__indicator {
     animation: none;

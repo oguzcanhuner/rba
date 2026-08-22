@@ -15,6 +15,9 @@ class WorkflowStore {
         source_path TEXT NOT NULL,
         source_hash TEXT NOT NULL,
         bundled_source TEXT NOT NULL,
+        branch TEXT,
+        worktree TEXT,
+        base_revision TEXT,
         status TEXT NOT NULL,
         input_json TEXT NOT NULL,
         output_json TEXT,
@@ -45,7 +48,45 @@ class WorkflowStore {
 
       CREATE INDEX IF NOT EXISTS workflow_operations_by_run
         ON workflow_operations(run_id, started_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_agent_sessions (
+        run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(run_id, name)
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_operation_messages (
+        id TEXT PRIMARY KEY,
+        operation_id TEXT NOT NULL REFERENCES workflow_operations(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        status TEXT NOT NULL,
+        parts_json TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS workflow_messages_by_operation
+        ON workflow_operation_messages(operation_id, position);
     `);
+
+    const columns = new Set(
+      this.database
+        .prepare('PRAGMA table_info(workflow_runs)')
+        .all()
+        .map(({ name }) => name),
+    );
+    for (const [name, type] of [
+      ['branch', 'TEXT'],
+      ['worktree', 'TEXT'],
+      ['base_revision', 'TEXT'],
+    ]) {
+      if (!columns.has(name)) {
+        this.database.exec(
+          `ALTER TABLE workflow_runs ADD COLUMN ${name} ${type}`,
+        );
+      }
+    }
   }
 
   createRun({
@@ -55,6 +96,9 @@ class WorkflowStore {
     sourceHash,
     bundledSource,
     input,
+    branch = null,
+    worktree = null,
+    baseRevision = null,
   }) {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -62,8 +106,9 @@ class WorkflowStore {
       .prepare(`
         INSERT INTO workflow_runs (
           id, task_id, workflow_name, source_path, source_hash,
-          bundled_source, status, input_json, started_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)
+          bundled_source, branch, worktree, base_revision, status,
+          input_json, started_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)
       `)
       .run(
         id,
@@ -72,6 +117,9 @@ class WorkflowStore {
         sourcePath,
         sourceHash,
         bundledSource,
+        branch,
+        worktree,
+        baseRevision,
         JSON.stringify(input),
         now,
         now,
@@ -84,7 +132,8 @@ class WorkflowStore {
       .prepare(`
         SELECT id, task_id AS taskId, workflow_name AS workflowName,
           source_path AS sourcePath, source_hash AS sourceHash,
-          bundled_source AS bundledSource, status, input_json AS inputJson,
+          bundled_source AS bundledSource, branch, worktree,
+          base_revision AS baseRevision, status, input_json AS inputJson,
           output_json AS outputJson, error, started_at AS startedAt,
           updated_at AS updatedAt, finished_at AS finishedAt
         FROM workflow_runs WHERE id = ?
@@ -98,7 +147,8 @@ class WorkflowStore {
       .prepare(`
         SELECT id, task_id AS taskId, workflow_name AS workflowName,
           source_path AS sourcePath, source_hash AS sourceHash,
-          bundled_source AS bundledSource, status, input_json AS inputJson,
+          bundled_source AS bundledSource, branch, worktree,
+          base_revision AS baseRevision, status, input_json AS inputJson,
           output_json AS outputJson, error, started_at AS startedAt,
           updated_at AS updatedAt, finished_at AS finishedAt
         FROM workflow_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
@@ -138,6 +188,7 @@ class WorkflowStore {
         ...row,
         input: JSON.parse(inputJson),
         output: outputJson === null ? null : JSON.parse(outputJson),
+        messages: this.listMessages(row.id),
       }));
   }
 
@@ -198,6 +249,60 @@ class WorkflowStore {
       .run(String(error), now, now, runId, key);
   }
 
+  saveMessage(operationId, message, position = 0) {
+    this.database
+      .prepare(`
+        INSERT INTO workflow_operation_messages (
+          id, operation_id, position, role, status, parts_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET position = excluded.position,
+          role = excluded.role, status = excluded.status,
+          parts_json = excluded.parts_json
+      `)
+      .run(
+        message.id,
+        operationId,
+        position,
+        message.role,
+        message.status,
+        JSON.stringify(message.parts),
+      );
+  }
+
+  listMessages(operationId) {
+    return this.database
+      .prepare(`
+        SELECT id, role, status, parts_json AS partsJson
+        FROM workflow_operation_messages WHERE operation_id = ? ORDER BY position
+      `)
+      .all(operationId)
+      .map(({ partsJson, ...message }) => ({
+        ...message,
+        parts: JSON.parse(partsJson),
+      }));
+  }
+
+  getAgentSession(runId, name) {
+    return (
+      this.database
+        .prepare(
+          'SELECT external_id AS externalId FROM workflow_agent_sessions WHERE run_id = ? AND name = ?',
+        )
+        .get(runId, name)?.externalId ?? null
+    );
+  }
+
+  saveAgentSession(runId, name, externalId) {
+    this.database
+      .prepare(`
+        INSERT INTO workflow_agent_sessions (run_id, name, external_id, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(run_id, name) DO UPDATE SET
+          external_id = excluded.external_id, updated_at = excluded.updated_at
+      `)
+      .run(runId, name, externalId, new Date().toISOString());
+  }
+
   finishRun(id, status, { output = null, error = null } = {}) {
     const now = new Date().toISOString();
     this.database
@@ -216,12 +321,35 @@ class WorkflowStore {
     return this.getRun(id);
   }
 
+  setWorkspace(id, { branch, worktree, baseRevision, input }) {
+    this.database
+      .prepare(`
+        UPDATE workflow_runs SET branch = ?, worktree = ?, base_revision = ?,
+          input_json = ?, updated_at = ? WHERE id = ?
+      `)
+      .run(
+        branch,
+        worktree,
+        baseRevision,
+        JSON.stringify(input),
+        new Date().toISOString(),
+        id,
+      );
+    return this.getRun(id);
+  }
+
   touchRun(id, status) {
     this.database
       .prepare(
         'UPDATE workflow_runs SET status = ?, updated_at = ? WHERE id = ?',
       )
       .run(status, new Date().toISOString(), id);
+  }
+
+  updateTaskStatus(taskId, status) {
+    this.database
+      .prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?')
+      .run(status, new Date().toISOString(), taskId);
   }
 
   interruptRunningRuns() {
