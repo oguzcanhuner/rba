@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { mkdtemp, writeFile } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const path = require('node:path');
 const { test } = require('node:test');
 const { GoalStore } = require('../goal-store');
 const { WorkflowService } = require('../workflow-service');
@@ -117,5 +120,68 @@ test('streams and persists a named agent operation', async () => {
   assert.equal(operation.status, 'completed');
   assert.equal(operation.messages[0].parts[0].text, 'Done.');
   assert.equal(workflows.getAgentSession(run.id, 'worker'), 'session-1');
+  goals.close();
+});
+
+test('runs a compiled workflow host through command and human operations', async () => {
+  const { goals, workflows } = setup();
+  goals.database.prepare('DELETE FROM workflow_runs').run();
+  const directory = await mkdtemp(path.join(tmpdir(), 'rba-host-'));
+  const sourcePath = path.join(directory, 'integration.workflow.ts');
+  await writeFile(
+    sourcePath,
+    `
+      import { workflow } from '@rba/workflow';
+      export default workflow({
+        id: 'integration',
+        async run(ctx) {
+          const command = await ctx.command('check', { command: ['verify'] });
+          const approval = await ctx.human('approval', { title: 'Approve' });
+          return { command, approval };
+        },
+      });
+    `,
+  );
+  let resolveWaiting;
+  let resolveComplete;
+  const waiting = new Promise((resolve) => {
+    resolveWaiting = resolve;
+  });
+  const complete = new Promise((resolve) => {
+    resolveComplete = resolve;
+  });
+  const service = new WorkflowService({
+    store: workflows,
+    taskStore: goals,
+    worktreesDirectory: '/workers',
+    makeDirectory: async () => {},
+    runCommand: async (command, args) => {
+      if (command === 'git' && args.includes('--show-toplevel')) {
+        return { stdout: '/repo\n' };
+      }
+      if (command === 'git' && args.at(-1) === 'HEAD') {
+        return { stdout: 'base\n' };
+      }
+      if (command === 'git') return { stdout: '' };
+      return { stdout: 'verified', stderr: '' };
+    },
+    onUpdate: (run) => {
+      if (run.status === 'waiting') resolveWaiting(run);
+      if (run.status === 'completed') resolveComplete(run);
+    },
+  });
+
+  const started = await service.start('task-1', sourcePath);
+  const suspended = await waiting;
+  assert.equal(
+    suspended.operations.find(({ key }) => key === 'check').output.stdout,
+    'verified',
+  );
+  service.resolveHuman(started.id, 'approval', { approved: true });
+  const completed = await complete;
+
+  assert.equal(completed.output.approval.approved, true);
+  assert.equal(completed.operations.length, 2);
+  service.shutdown();
   goals.close();
 });

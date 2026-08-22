@@ -79,3 +79,45 @@ test('rejects changed operation input during replay', () => {
   );
   goals.close();
 });
+
+test('recovers control-flow replay but fails interrupted side effects', () => {
+  const { goals, workflows } = stores();
+  const safe = workflows.createRun({
+    taskId: 'task-1',
+    workflowName: 'safe',
+    sourcePath: '/safe.ts',
+    sourceHash: 'safe',
+    bundledSource: 'safe',
+    input: {},
+  });
+  workflows.startOperation(safe.id, 'done', 'command', { command: ['true'] });
+  workflows.completeOperation(safe.id, 'done', { ok: true });
+
+  goals.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status, created_at, updated_at
+      ) VALUES ('task-2', 'goal-1', 2, 'Other', 'Other', 'working', ?, ?)
+    `)
+    .run('2026-08-22T10:02:00.000Z', '2026-08-22T10:02:00.000Z');
+  const unsafe = workflows.createRun({
+    taskId: 'task-2',
+    workflowName: 'unsafe',
+    sourcePath: '/unsafe.ts',
+    sourceHash: 'unsafe',
+    bundledSource: 'unsafe',
+    input: {},
+  });
+  workflows.startOperation(unsafe.id, 'running', 'command', {
+    command: ['npm', 'test'],
+  });
+
+  const resumable = workflows.recoverInterruptedRuns();
+  assert.deepEqual(
+    resumable.map(({ id }) => id),
+    [safe.id],
+  );
+  assert.equal(workflows.getRun(unsafe.id).status, 'failed');
+  assert.equal(goals.getTaskForWorker('task-2').status, 'failed');
+  goals.close();
+});

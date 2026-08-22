@@ -135,6 +135,12 @@ class WorkflowService {
     return this.store.publicRun(this.store.getTaskRun(taskId));
   }
 
+  resume(run) {
+    if (run?.status !== 'running') return;
+    this.launch(run);
+    this.broadcast(run);
+  }
+
   launch(run) {
     if (this.disposed) return;
     const host = this.spawnHost(path.join(__dirname, 'workflow-host.js'), [], {
@@ -201,7 +207,7 @@ class WorkflowService {
       } else if (message.operationType === 'command') {
         await this.executeCommand(runId, host, message);
       } else if (message.operationType === 'agent') {
-        this.executeAgent(runId, host, message);
+        await this.executeAgent(runId, host, message);
       } else if (message.operationType === 'sleep') {
         this.executeSleep(runId, host, message);
       } else {
@@ -259,7 +265,7 @@ class WorkflowService {
     this.broadcast(this.store.getRun(runId));
   }
 
-  executeAgent(runId, host, message) {
+  async executeAgent(runId, host, message) {
     const run = this.store.getRun(runId);
     const options = message.input;
     if (
@@ -269,6 +275,21 @@ class WorkflowService {
     ) {
       throw new Error('Agent operations require a prompt.');
     }
+    if (
+      options.timeoutMs !== undefined &&
+      (!Number.isFinite(options.timeoutMs) ||
+        options.timeoutMs <= 0 ||
+        options.timeoutMs > 86_400_000)
+    ) {
+      throw new Error('Agent timeoutMs must be between 1 and 86400000.');
+    }
+    const diff = options.includeDiff
+      ? (await this.getDiff(run.taskId)).patch
+      : null;
+    const prompt =
+      diff === null
+        ? options.prompt
+        : `${options.prompt}\n\n# Current worktree diff\n\n${diff || '(No changes.)'}`;
     const operation = this.store.startOperation(
       runId,
       message.key,
@@ -299,7 +320,7 @@ class WorkflowService {
     };
     this.agents.set(`${runId}:${message.key}`, runtime);
     runtime.stream = this.beginAgent({
-      prompt: options.prompt,
+      prompt,
       sessionId,
       cwd: run.worktree,
       onText: (text) => {
@@ -358,6 +379,12 @@ class WorkflowService {
         this.persistAgent(runtime);
       },
     });
+    if (options.timeoutMs !== undefined) {
+      runtime.timeout = setTimeout(
+        () => runtime.stream.cancel(),
+        options.timeoutMs,
+      );
+    }
     void runtime.stream.completion.then(
       (result) => {
         this.store.saveAgentSession(runId, sessionName, result.sessionId);
@@ -401,6 +428,7 @@ class WorkflowService {
   }
 
   finishAgent(runtime, output) {
+    if (runtime.timeout) clearTimeout(runtime.timeout);
     runtime.message = {
       ...runtime.message,
       status: 'complete',
@@ -418,6 +446,7 @@ class WorkflowService {
   }
 
   failAgent(runtime, error) {
+    if (runtime.timeout) clearTimeout(runtime.timeout);
     const text = error instanceof Error ? error.message : String(error);
     runtime.message = {
       ...runtime.message,

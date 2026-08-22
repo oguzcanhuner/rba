@@ -619,7 +619,7 @@ app.whenReady().then(() => {
   goalStore = new GoalStore(goalDatabase);
   goalStore.interruptWorkingRuns();
   workflowStore = new WorkflowStore(goalStore.database);
-  workflowStore.interruptRunningRuns();
+  const resumableWorkflows = workflowStore.recoverInterruptedRuns();
   workerService = new WorkerService({
     store: goalStore,
     worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
@@ -634,6 +634,7 @@ app.whenReady().then(() => {
     ),
     onUpdate: broadcastWorkflow,
   });
+  for (const run of resumableWorkflows) workflowService.resume(run);
   createWindow();
 
   app.on('activate', () => {

@@ -672,7 +672,9 @@ class GoalStore {
         .prepare(`
           UPDATE tasks
           SET status = 'failed', updated_at = ?
-          WHERE status = 'working'
+          WHERE id IN (
+            SELECT task_id FROM worker_runs WHERE status = 'failed'
+          )
         `)
         .run(now);
       this.database.exec('COMMIT');

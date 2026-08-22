@@ -1,6 +1,7 @@
 const vm = require('node:vm');
 
 const pending = new Map();
+const seenOperations = new Set();
 
 function loadWorkflow(source, filename) {
   const module = { exports: {} };
@@ -24,6 +25,10 @@ function operation(type, key, input) {
       'Workflow operation IDs must be non-empty strings under 200 characters.',
     );
   }
+  if (seenOperations.has(key)) {
+    throw new Error(`Workflow operation \`${key}\` was called more than once.`);
+  }
+  seenOperations.add(key);
   const requestId = `${key}:${crypto.randomUUID()}`;
   return new Promise((resolve, reject) => {
     pending.set(requestId, { resolve, reject });
@@ -37,14 +42,21 @@ function operation(type, key, input) {
   });
 }
 
-function context(input) {
+function context(input, prefix = '') {
+  const key = (id) => `${prefix}${id}`;
   return {
     input,
     task: input.task,
-    command: (key, options) => operation('command', key, options),
-    agent: (key, options) => operation('agent', key, options),
-    human: (key, options) => operation('human', key, options),
-    sleep: (key, options) => operation('sleep', key, options),
+    command: (id, options) => operation('command', key(id), options),
+    agent: (id, options) => operation('agent', key(id), options),
+    human: (id, options) => operation('human', key(id), options),
+    sleep: (id, options) => operation('sleep', key(id), options),
+    workflow: (id, definition, childInput) => {
+      if (!definition || typeof definition.run !== 'function') {
+        throw new Error('Child workflows must be workflow definitions.');
+      }
+      return definition.run(context(childInput, `${key(id)}/`));
+    },
   };
 }
 

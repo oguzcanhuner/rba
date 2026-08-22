@@ -181,7 +181,7 @@ class WorkflowStore {
           operation_type AS type, status, attempt, input_json AS inputJson,
           output_json AS outputJson, error, started_at AS startedAt,
           updated_at AS updatedAt, finished_at AS finishedAt
-        FROM workflow_operations WHERE run_id = ? ORDER BY started_at, id
+        FROM workflow_operations WHERE run_id = ? ORDER BY rowid
       `)
       .all(runId)
       .map(({ inputJson, outputJson, ...row }) => ({
@@ -352,19 +352,40 @@ class WorkflowStore {
       .run(status, new Date().toISOString(), taskId);
   }
 
-  interruptRunningRuns() {
+  recoverInterruptedRuns() {
     const now = new Date().toISOString();
     const error = 'RBA stopped while this workflow operation was running.';
-    this.database
+    const interruptedRunIds = this.database
       .prepare(
-        `UPDATE workflow_operations SET status = 'failed', error = ?, updated_at = ?, finished_at = ? WHERE status = 'running'`,
+        "SELECT DISTINCT run_id AS runId FROM workflow_operations WHERE status = 'running'",
       )
-      .run(error, now, now);
+      .all()
+      .map(({ runId }) => runId);
     this.database
-      .prepare(
-        `UPDATE workflow_runs SET status = 'failed', error = ?, updated_at = ?, finished_at = ? WHERE status = 'running'`,
-      )
+      .prepare(`
+        UPDATE workflow_operations SET status = 'failed', error = ?,
+          updated_at = ?, finished_at = ? WHERE status = 'running'
+      `)
       .run(error, now, now);
+    const failRun = this.database.prepare(`
+      UPDATE workflow_runs SET status = 'failed', error = ?, updated_at = ?,
+        finished_at = ? WHERE id = ?
+    `);
+    for (const runId of interruptedRunIds) {
+      failRun.run(error, now, now, runId);
+      const run = this.getRun(runId);
+      if (run) this.updateTaskStatus(run.taskId, 'failed');
+    }
+    return this.listRunnableRuns();
+  }
+
+  listRunnableRuns() {
+    return this.database
+      .prepare(
+        "SELECT id FROM workflow_runs WHERE status = 'running' ORDER BY started_at",
+      )
+      .all()
+      .map(({ id }) => this.getRun(id));
   }
 }
 

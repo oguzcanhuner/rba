@@ -21,12 +21,18 @@ declare module '@rba/workflow' {
       prompt: string;
       session?: string;
       includeDiff?: boolean;
+      timeoutMs?: number;
     }): Promise<{ sessionId: string; text: string }>;
     human<T = unknown>(id: string, options: {
       title: string;
       description?: string;
     }): Promise<T>;
     sleep(id: string, options: { milliseconds: number }): Promise<void>;
+    workflow<ChildInput, ChildOutput>(
+      id: string,
+      definition: { run(context: WorkflowContext<ChildInput>): Promise<ChildOutput> },
+      input: ChildInput,
+    ): Promise<ChildOutput>;
   };
   export function workflow<Input = unknown, Output = unknown>(definition: {
     id: string;
