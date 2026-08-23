@@ -1,4 +1,11 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type {
   DisplayMessage,
@@ -34,26 +41,103 @@ export function App() {
     storage: window.localStorage,
   });
   const [goals, setGoals] = useState<GoalSummary[]>([]);
-  const [activeGoal, setActiveGoal] = useState<Goal | null>(null);
+  // Goals currently loaded in memory: the displayed goal plus any goals
+  // streaming in the background. Mirrored in a ref so stream event handlers
+  // always read the latest value synchronously, unaffected by React batching.
+  const [goalsCache, setGoalsCache] = useState<Map<string, Goal>>(new Map());
+  const goalsCacheRef = useRef<Map<string, Goal>>(goalsCache);
+  const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
+  // Per-goal in-flight turn: goalId -> requestId.
+  const [busyRequests, setBusyRequests] = useState<Map<string, string>>(
+    new Map(),
+  );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
-  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const activeGoal = useMemo(
+    () => (activeGoalId ? (goalsCache.get(activeGoalId) ?? null) : null),
+    [activeGoalId, goalsCache],
+  );
+  const activeRequestId = activeGoalId
+    ? (busyRequests.get(activeGoalId) ?? null)
+    : null;
+  const busyGoalIds = useMemo(
+    () => new Set(busyRequests.keys()),
+    [busyRequests],
+  );
   const messages = activeGoal?.messages ?? [];
 
   const tasks = useTasks(activeGoal?.id ?? null);
   const { replaceAll: replaceAllTasks, replaceGoalTasks } = tasks;
 
+  const getGoal = useCallback(
+    (goalId: string) => goalsCacheRef.current.get(goalId) ?? null,
+    [],
+  );
+
+  const putGoal = useCallback((goal: Goal) => {
+    const next = new Map(goalsCacheRef.current);
+    next.set(goal.id, goal);
+    goalsCacheRef.current = next;
+    setGoalsCache(next);
+  }, []);
+
+  const updateGoal = useCallback(
+    (goalId: string, updater: (goal: Goal) => Goal) => {
+      const existing = goalsCacheRef.current.get(goalId);
+      if (!existing) {
+        return null;
+      }
+
+      const updated = updater(existing);
+      const next = new Map(goalsCacheRef.current);
+      next.set(goalId, updated);
+      goalsCacheRef.current = next;
+      setGoalsCache(next);
+      return updated;
+    },
+    [],
+  );
+
+  const persistGoal = useCallback((goal: Goal) => {
+    window.goals
+      .save(goal)
+      .then(() => {
+        const summary = summaryOf(goal);
+        setGoals((current) =>
+          [summary, ...current.filter((item) => item.id !== summary.id)].sort(
+            byNewestCreation,
+          ),
+        );
+      })
+      .catch(() => {
+        setError('This goal could not be saved.');
+      });
+  }, []);
+
+  const clearBusy = useCallback((goalId: string, requestId: string) => {
+    setBusyRequests((current) => {
+      if (current.get(goalId) !== requestId) {
+        return current;
+      }
+      const next = new Map(current);
+      next.delete(goalId);
+      return next;
+    });
+  }, []);
+
   const openGoal = useCallback(
     (loaded: GoalWithTasks) => {
       const { tasks: goalTasks, ...goal } = loaded;
       const restored = restoreInterruptedMessages(goal);
-      setActiveGoal(restored);
+      putGoal(restored);
+      setActiveGoalId(restored.id);
       replaceGoalTasks(restored.id, restored.title, goalTasks);
       return restored;
     },
-    [replaceGoalTasks],
+    [putGoal, replaceGoalTasks],
   );
 
   const applyTasksUpdate = useCallback(
@@ -81,11 +165,12 @@ export function App() {
         status: 'streaming',
         parts: [],
       };
-      const goal: Goal = activeGoal
+      const current = activeGoalId ? getGoal(activeGoalId) : null;
+      const goal: Goal = current
         ? {
-            ...activeGoal,
+            ...current,
             updatedAt: now,
-            messages: [...activeGoal.messages, userMessage, assistantMessage],
+            messages: [...current.messages, userMessage, assistantMessage],
           }
         : {
             id: crypto.randomUUID(),
@@ -98,8 +183,9 @@ export function App() {
             updatedAt: now,
           };
 
-      setActiveGoal(goal);
-      setActiveRequestId(requestId);
+      putGoal(goal);
+      setActiveGoalId(goal.id);
+      setBusyRequests((requests) => new Map(requests).set(goal.id, requestId));
       window.goals
         .save(goal)
         .then(() => {
@@ -114,19 +200,17 @@ export function App() {
           });
         })
         .catch(() => {
-          setActiveRequestId(null);
-          setActiveGoal((current) =>
-            current
-              ? updateAssistant(current, requestId, (message) => ({
-                  ...message,
-                  status: 'error',
-                }))
-              : current,
+          clearBusy(goal.id, requestId);
+          updateGoal(goal.id, (g) =>
+            updateAssistant(g, requestId, (message) => ({
+              ...message,
+              status: 'error',
+            })),
           );
           setError('This goal could not be saved.');
         });
     },
-    [activeGoal],
+    [activeGoalId, getGoal, putGoal, updateGoal, clearBusy],
   );
 
   const {
@@ -135,13 +219,14 @@ export function App() {
     removeQueued,
     cancel: cancelResponse,
   } = useGoalStream({
-    activeRequestId,
-    setActiveRequestId,
+    busyRequests,
+    clearBusy,
     workingDirectory,
-    setActiveGoal,
+    updateGoal,
+    getGoal,
+    persistGoal,
     setError,
-    activeGoalId: activeGoal?.id ?? null,
-    activeGoalTitle: activeGoal?.title ?? null,
+    activeGoalId,
     replaceGoalTasks,
     startRequest: startGoalRequest,
   });
@@ -204,23 +289,11 @@ export function App() {
     }
 
     const timeout = window.setTimeout(() => {
-      window.goals
-        .save(activeGoal)
-        .then(() => {
-          const summary = summaryOf(activeGoal);
-          setGoals((current) =>
-            [summary, ...current.filter((item) => item.id !== summary.id)].sort(
-              byNewestCreation,
-            ),
-          );
-        })
-        .catch(() => {
-          setError('This goal could not be saved.');
-        });
+      persistGoal(activeGoal);
     }, 150);
 
     return () => window.clearTimeout(timeout);
-  }, [activeGoal]);
+  }, [activeGoal, persistGoal]);
 
   function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -256,7 +329,7 @@ export function App() {
       if (directory && directory !== workingDirectory) {
         await persistCurrentGoal();
         setWorkingDirectory(directory);
-        setActiveGoal(null);
+        setActiveGoalId(null);
         closeWorker();
         setDraft('');
         setError(null);
@@ -267,12 +340,26 @@ export function App() {
   }
 
   async function selectGoal(id: string) {
-    if (activeRequestId || id === activeGoal?.id) {
+    if (id === activeGoalId) {
+      return;
+    }
+
+    await persistCurrentGoal();
+
+    // A goal that is already loaded (e.g. streaming in the background) keeps
+    // its in-memory state rather than being reloaded from disk, which would
+    // otherwise clobber it with the last-saved snapshot.
+    const cached = getGoal(id);
+    if (cached) {
+      setActiveGoalId(id);
+      setWorkingDirectory(cached.workingDirectory);
+      closeWorker();
+      setDraft('');
+      setError(null);
       return;
     }
 
     try {
-      await persistCurrentGoal();
       const goal = await window.goals.get(id);
 
       if (goal) {
@@ -288,13 +375,9 @@ export function App() {
   }
 
   async function startNewGoal() {
-    if (activeRequestId) {
-      return;
-    }
-
     try {
       await persistCurrentGoal();
-      setActiveGoal(null);
+      setActiveGoalId(null);
       closeWorker();
       setDraft('');
       setError(null);
@@ -310,9 +393,10 @@ export function App() {
 
     try {
       applyTasksUpdate(await window.goals.commitTasks(activeGoal.id));
-      setActiveGoal((current) =>
-        current ? { ...current, updatedAt: new Date().toISOString() } : current,
-      );
+      updateGoal(activeGoal.id, (current) => ({
+        ...current,
+        updatedAt: new Date().toISOString(),
+      }));
     } catch {
       setError('Tasks could not be queued.');
     }
@@ -332,7 +416,7 @@ export function App() {
           tasks={tasks.committed}
           activeGoalId={activeGoal?.id ?? null}
           isCollapsed={isSidebarCollapsed}
-          isBusy={activeRequestId !== null}
+          busyGoalIds={busyGoalIds}
           onToggleCollapse={() =>
             setIsSidebarCollapsed((collapsed) => !collapsed)
           }
