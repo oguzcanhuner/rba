@@ -38,6 +38,31 @@ export function PlanningPanel({
 
   return (
     <aside className="planning-panel" aria-label="Goal workspace">
+      <Collapsible className="planning-section" defaultOpen>
+        <CollapsibleTrigger className="planning-section__trigger">
+          <span>Tasks</span>
+          <span className="planning-section__count">{tasks.length}</span>
+          <span className="planning-section__chevron" aria-hidden="true">
+            ⌄
+          </span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="planning-section__content">
+          {goal ? (
+            <TaskList
+              tasks={tasks}
+              commitDisabled={commitDisabled}
+              onCommit={onCommit}
+              onOpenTask={onOpenTask}
+              showHeading={false}
+            />
+          ) : (
+            <p className="planning-section__empty">
+              Start a conversation to draft tasks.
+            </p>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
       <Collapsible
         className="planning-section"
         defaultOpen={artifacts.length > 0}
@@ -84,31 +109,6 @@ export function PlanningPanel({
                 />
               )}
             </div>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
-
-      <Collapsible className="planning-section" defaultOpen>
-        <CollapsibleTrigger className="planning-section__trigger">
-          <span>Tasks</span>
-          <span className="planning-section__count">{tasks.length}</span>
-          <span className="planning-section__chevron" aria-hidden="true">
-            ⌄
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="planning-section__content">
-          {goal ? (
-            <TaskList
-              tasks={tasks}
-              commitDisabled={commitDisabled}
-              onCommit={onCommit}
-              onOpenTask={onOpenTask}
-              showHeading={false}
-            />
-          ) : (
-            <p className="planning-section__empty">
-              Start a conversation to draft tasks.
-            </p>
           )}
         </CollapsibleContent>
       </Collapsible>
