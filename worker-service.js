@@ -27,20 +27,13 @@ function finishTools(parts, status) {
 }
 
 function workerTaskPrompt(task) {
-  const findings = task.findingsMarkdown?.trim()
-    ? task.findingsMarkdown
-    : '(No findings were recorded for this goal.)';
   return `Implement this task autonomously and then stop.
 
 # Task
 
 ${task.title}
 
-${task.specMarkdown}
-
-# Goal findings
-
-${findings}`;
+${task.specMarkdown}`;
 }
 
 class WorkerService {

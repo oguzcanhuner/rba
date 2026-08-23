@@ -7,6 +7,7 @@ type TaskListProps<T extends Task> = {
   commitDisabled: boolean;
   onCommit: () => void;
   onOpenTask: (task: T) => void;
+  showHeading?: boolean;
 };
 
 export function TaskList<T extends Task>({
@@ -14,15 +15,22 @@ export function TaskList<T extends Task>({
   commitDisabled,
   onCommit,
   onOpenTask,
+  showHeading = true,
 }: TaskListProps<T>) {
   const draftCount = tasks.filter((task) => task.status === 'draft').length;
 
   return (
-    <section className="tasks" aria-labelledby="tasks-heading">
-      <header className="tasks__header">
+    <section
+      className="tasks"
+      aria-label={showHeading ? undefined : 'Tasks'}
+      aria-labelledby={showHeading ? 'tasks-heading' : undefined}
+    >
+      <header
+        className={`tasks__header${showHeading ? '' : ' tasks__header--actions-only'}`}
+      >
         <div className="tasks__title">
-          <h3 id="tasks-heading">Tasks</h3>
-          <span>{tasks.length}</span>
+          {showHeading && <h3 id="tasks-heading">Tasks</h3>}
+          {showHeading && <span>{tasks.length}</span>}
         </div>
         {draftCount > 0 && (
           <Button

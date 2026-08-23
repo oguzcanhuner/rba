@@ -30,11 +30,7 @@ export type ClaudeStreamEvent =
       requestId: string;
       tool: { id: string; isError: boolean };
     }
-  | {
-      type: 'findings-updated';
-      requestId: string;
-      markdown: string;
-    }
+  | { type: 'artifacts-updated'; requestId: string; artifacts: Artifact[] }
   | {
       type: 'tasks-updated';
       requestId: string;
@@ -86,6 +82,14 @@ export type GoalSummary = {
   updatedAt: string;
 };
 
+export type Artifact = {
+  id: string;
+  title: string;
+  html: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TaskStatus =
   | 'draft'
   | 'queued'
@@ -111,7 +115,7 @@ export type SidebarTask = Task & {
 
 export type Goal = GoalSummary & {
   agentSession: AgentSession | null;
-  findingsMarkdown: string | null;
+  artifacts: Artifact[];
   messages: DisplayMessage[];
 };
 
