@@ -10,7 +10,7 @@
     "dev:electron": "wait-on http-get://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build": "tsc --noEmit && vite build",
     "run:built": "npm run build && electron .",
-    "check": "node --check main.js && node --check preload.js && node --check claude-cli-service.js && node --check goal-store.js && node --check findings-mcp-server.js && node --check worker-service.js && tsc --noEmit",
+    "check": "node --check main.js && node --check preload.js && node --check claude-cli-service.js && node --check goal-store.js && node --check findings-mcp-server.js && node --check artifact-document.js && node --check worker-service.js && tsc --noEmit",
     "test": "node --test",
     "lint": "biome lint .",
     "format": "biome format --write .",

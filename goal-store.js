@@ -350,6 +350,18 @@ class GoalStore {
       .map((row) => ({ ...row }));
   }
 
+  getArtifact(id) {
+    const row = this.database
+      .prepare(`
+        SELECT id, goal_id AS goalId, title, html,
+               created_at AS createdAt, updated_at AS updatedAt
+        FROM artifacts
+        WHERE id = ?
+      `)
+      .get(id);
+    return row ? { ...row } : null;
+  }
+
   listTasks(goalId) {
     return this.database
       .prepare(`

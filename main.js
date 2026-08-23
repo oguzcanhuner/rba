@@ -1,8 +1,9 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, protocol } = require('electron');
 const { realpath, stat } = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
+const { renderArtifactDocument } = require('./artifact-document');
 const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
 
@@ -10,6 +11,38 @@ const activeRequests = new Map();
 let goalStore;
 let goalDatabase;
 let workerService;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'rba-artifact',
+    privileges: { standard: true, secure: true },
+  },
+]);
+
+function artifactResponse(status, body) {
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy':
+        "default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' https:; img-src data: https:; font-src data: https:; connect-src https:; media-src data: https:",
+    },
+  });
+}
+
+function registerArtifactProtocol() {
+  protocol.handle('rba-artifact', (request) => {
+    const url = new URL(request.url);
+    const id = decodeURIComponent(url.pathname.slice(1));
+    if (url.hostname !== 'artifact' || !id || id.length > 100) {
+      return artifactResponse(400, '<h1>Invalid artifact</h1>');
+    }
+    const artifact = goalStore.getArtifact(id);
+    return artifact
+      ? artifactResponse(200, renderArtifactDocument(artifact.html))
+      : artifactResponse(404, '<h1>Artifact not found</h1>');
+  });
+}
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
@@ -506,6 +539,7 @@ function createWindow() {
 app.whenReady().then(() => {
   goalDatabase = path.join(app.getPath('userData'), 'goals.sqlite3');
   goalStore = new GoalStore(goalDatabase);
+  registerArtifactProtocol();
   goalStore.interruptWorkingRuns();
   workerService = new WorkerService({
     store: goalStore,

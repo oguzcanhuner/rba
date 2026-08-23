@@ -79,7 +79,7 @@ export function PlanningPanel({
               {selectedArtifact && (
                 <iframe
                   className="artifact-frame"
-                  srcDoc={selectedArtifact.html}
+                  src={`rba-artifact://artifact/${encodeURIComponent(selectedArtifact.id)}?updated=${encodeURIComponent(selectedArtifact.updatedAt)}`}
                   title={selectedArtifact.title}
                 />
               )}
