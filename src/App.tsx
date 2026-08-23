@@ -406,7 +406,7 @@ export function App() {
     <main
       className={
         activeTask
-          ? 'worker-shell dark'
+          ? 'worker-shell'
           : `app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`
       }
     >

@@ -119,7 +119,11 @@ export function WorkerScreen({
             ← Back
           </Button>
           <h1>{task.title}</h1>
-          <span className="worker-status worker-status--queued">● queued</span>
+          <span
+            className="worker-status worker-status--queued"
+            aria-hidden="true"
+          />
+          <span className="sr-only">queued</span>
         </header>
         <main className="task-ready">
           <div className="task-ready__content">
@@ -150,9 +154,11 @@ export function WorkerScreen({
           ← Back
         </Button>
         <h1>{task.title}</h1>
-        <span className={`worker-status worker-status--${run.status}`}>
-          ● {run.status}
-        </span>
+        <span
+          className={`worker-status worker-status--${run.status}`}
+          aria-hidden="true"
+        />
+        <span className="sr-only">{run.status}</span>
       </header>
 
       <ResizablePanelGroup
