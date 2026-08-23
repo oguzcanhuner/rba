@@ -95,9 +95,6 @@ function isValidGoal(goal) {
       path.isAbsolute(goal.workingDirectory) &&
       typeof goal.createdAt === 'string' &&
       typeof goal.updatedAt === 'string' &&
-      (goal.findingsMarkdown === null ||
-        (typeof goal.findingsMarkdown === 'string' &&
-          goal.findingsMarkdown.length <= 500_000)) &&
       validSession &&
       // Tasks are deliberately not validated here: a goal save never writes a
       // task row, so the renderer does not send them.
@@ -207,7 +204,11 @@ async function startClaudeRequest(event, request) {
     }
 
     const toolNames = new Map();
-    const pendingFindings = new Map();
+    const artifactMutationTools = new Set([
+      'mcp__rba__create_artifact',
+      'mcp__rba__update_artifact',
+      'mcp__rba__remove_artifact',
+    ]);
     const taskMutationTools = new Set([
       'mcp__rba__add_task',
       'mcp__rba__update_task',
@@ -242,28 +243,24 @@ async function startClaudeRequest(event, request) {
       },
       onToolInput: (tool) => {
         const toolName = toolNames.get(tool.id);
-        if (
-          toolName === 'mcp__rba__update_findings' &&
-          typeof tool.input?.markdown === 'string' &&
-          tool.input.markdown.length <= 500_000
-        ) {
-          pendingFindings.set(tool.id, tool.input.markdown);
-        }
         sendClaudeEvent(event.sender, {
           type: 'tool-input',
           requestId: request.requestId,
           tool: {
             ...tool,
-            input:
-              toolName === 'mcp__rba__update_findings'
-                ? {}
-                : taskMutationTools.has(toolName)
-                  ? Object.fromEntries(
-                      Object.entries(tool.input ?? {}).filter(
-                        ([key]) => key !== 'specMarkdown',
-                      ),
-                    )
-                  : relativeToolInput(tool.input, cwd),
+            input: artifactMutationTools.has(toolName)
+              ? Object.fromEntries(
+                  Object.entries(tool.input ?? {}).filter(
+                    ([key]) => key !== 'html',
+                  ),
+                )
+              : taskMutationTools.has(toolName)
+                ? Object.fromEntries(
+                    Object.entries(tool.input ?? {}).filter(
+                      ([key]) => key !== 'specMarkdown',
+                    ),
+                  )
+                : relativeToolInput(tool.input, cwd),
           },
         });
       },
@@ -273,12 +270,14 @@ async function startClaudeRequest(event, request) {
           requestId: request.requestId,
           tool,
         });
-        const markdown = pendingFindings.get(tool.id);
-        if (!tool.isError && markdown !== undefined) {
+        if (
+          !tool.isError &&
+          artifactMutationTools.has(toolNames.get(tool.id))
+        ) {
           sendClaudeEvent(event.sender, {
-            type: 'findings-updated',
+            type: 'artifacts-updated',
             requestId: request.requestId,
-            markdown,
+            artifacts: goalStore.listArtifacts(request.goalId),
           });
         }
         if (!tool.isError && taskMutationTools.has(toolNames.get(tool.id))) {
@@ -288,7 +287,6 @@ async function startClaudeRequest(event, request) {
             tasks: goalStore.listTasks(request.goalId),
           });
         }
-        pendingFindings.delete(tool.id);
         toolNames.delete(tool.id);
       },
     });

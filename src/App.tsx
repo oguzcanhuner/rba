@@ -8,8 +8,8 @@ import type {
   Task,
 } from './claude';
 import { ChatPanel } from './components/ChatPanel';
-import { FindingsPanel } from './components/FindingsPanel';
 import { GoalSidebar } from './components/GoalSidebar';
+import { PlanningPanel } from './components/PlanningPanel';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -30,7 +30,7 @@ import {
 export function App() {
   const workspaceLayout = useDefaultLayout({
     id: 'rba.goal-workspace',
-    panelIds: ['findings', 'chat'],
+    panelIds: ['planning', 'chat'],
     storage: window.localStorage,
   });
   const [goals, setGoals] = useState<GoalSummary[]>([]);
@@ -92,7 +92,7 @@ export function App() {
             title: goalTitle(content),
             workingDirectory: cwd,
             agentSession: null,
-            findingsMarkdown: null,
+            artifacts: [],
             messages: [userMessage, assistantMessage],
             createdAt: now,
             updatedAt: now,
@@ -365,8 +365,8 @@ export function App() {
           onLayoutChanged={workspaceLayout.onLayoutChanged}
           orientation="horizontal"
         >
-          <ResizablePanel defaultSize={55} id="findings" minSize={30}>
-            <FindingsPanel
+          <ResizablePanel defaultSize={55} id="planning" minSize={30}>
+            <PlanningPanel
               goal={activeGoal}
               tasks={tasks.forActiveGoal}
               commitDisabled={

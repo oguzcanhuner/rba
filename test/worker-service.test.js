@@ -11,7 +11,6 @@ function storeWithQueuedTask() {
     title: 'Build workers',
     workingDirectory: '/repo',
     agentSession: null,
-    findingsMarkdown: '# Findings\n\nKeep it small.',
     tasks: [],
     messages: [],
     createdAt: '2026-08-09T10:00:00.000Z',
@@ -65,7 +64,6 @@ test('runs a queued task in a worktree and persists streamed activity', async ()
   assert.equal(started.status, 'working');
   assert.equal(started.worktree, '/worker-root/task-1');
   assert.match(callbacks.prompt, /Implement the worker/);
-  assert.match(callbacks.prompt, /Keep it small/);
   assert.deepEqual(commands.at(-1), {
     command: 'git',
     args: [

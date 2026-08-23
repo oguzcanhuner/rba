@@ -142,6 +142,29 @@ const migrations = [
       }
     },
   },
+  {
+    // Versions 6 and 7 were used by the removed evidence-planning model.
+    // Keep this migration distinct so existing databases also receive it.
+    version: 8,
+    isApplied(database) {
+      return hasTable(database, 'artifacts');
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS artifacts (
+          id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          html TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS artifacts_by_goal
+          ON artifacts(goal_id, created_at);
+      `);
+    },
+  },
 ];
 
 function migrate(database) {
@@ -193,12 +216,11 @@ class GoalStore {
 
     this.upsertGoal = this.database.prepare(`
       INSERT INTO goals (
-        id, title, working_directory, findings_markdown, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        id, title, working_directory, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         working_directory = excluded.working_directory,
-        findings_markdown = excluded.findings_markdown,
         updated_at = excluded.updated_at
     `);
     this.deactivateSessions = this.database.prepare(`
@@ -256,7 +278,6 @@ class GoalStore {
           id,
           title,
           working_directory AS workingDirectory,
-          findings_markdown AS findingsMarkdown,
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM goals
@@ -306,9 +327,27 @@ class GoalStore {
     return {
       ...goal,
       agentSession,
+      artifacts: this.listArtifacts(id),
       tasks: this.listTasks(id),
       messages,
     };
+  }
+
+  listArtifacts(goalId) {
+    return this.database
+      .prepare(`
+        SELECT
+          id,
+          title,
+          html,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM artifacts
+        WHERE goal_id = ?
+        ORDER BY created_at, id
+      `)
+      .all(goalId)
+      .map((row) => ({ ...row }));
   }
 
   listTasks(goalId) {
@@ -387,8 +426,7 @@ class GoalStore {
           t.title,
           t.spec_markdown AS specMarkdown,
           t.status,
-          e.working_directory AS workingDirectory,
-          e.findings_markdown AS findingsMarkdown
+          e.working_directory AS workingDirectory
         FROM tasks t
         JOIN goals e ON e.id = t.goal_id
         WHERE t.id = ?
@@ -639,7 +677,6 @@ class GoalStore {
         goal.id,
         goal.title,
         goal.workingDirectory,
-        goal.findingsMarkdown,
         goal.createdAt,
         goal.updatedAt,
       );

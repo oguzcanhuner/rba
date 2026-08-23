@@ -14,13 +14,21 @@ export const plannerToolPhrases: Record<string, ToolPhrase> = {
   ...FILE_TOOLS,
   WebSearch: { action: 'search the web', completed: 'Searched the web' },
   WebFetch: { action: 'fetch page', completed: 'Fetched page' },
-  mcp__rba__update_findings: {
-    action: 'update findings',
-    completed: 'Updated findings',
+  mcp__rba__list_artifacts: {
+    action: 'list artifacts',
+    completed: 'Listed artifacts',
   },
-  mcp__rba__read_findings: {
-    action: 'read findings',
-    completed: 'Read findings',
+  mcp__rba__create_artifact: {
+    action: 'create artifact',
+    completed: 'Created artifact',
+  },
+  mcp__rba__update_artifact: {
+    action: 'update artifact',
+    completed: 'Updated artifact',
+  },
+  mcp__rba__remove_artifact: {
+    action: 'remove artifact',
+    completed: 'Removed artifact',
   },
   mcp__rba__read_tasks: { action: 'read tasks', completed: 'Read tasks' },
   mcp__rba__add_task: { action: 'draft task', completed: 'Drafted task' },

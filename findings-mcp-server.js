@@ -7,12 +7,13 @@ const {
 } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 
-const MAX_FINDINGS_LENGTH = 500_000;
+const MAX_ARTIFACT_TITLE_LENGTH = 200;
+const MAX_ARTIFACT_HTML_LENGTH = 1_000_000;
 const MAX_TASK_TITLE_LENGTH = 200;
 const MAX_TASK_SPEC_LENGTH = 500_000;
 const TASK_STATUSES = new Set(['draft', 'queued']);
 
-class FindingsRepository {
+class ArtifactsRepository {
   constructor(filename, goalId) {
     if (!path.isAbsolute(filename)) {
       throw new Error('The goal database path must be absolute.');
@@ -27,32 +28,123 @@ class FindingsRepository {
 
     this.goalId = goalId;
     this.database = new DatabaseSync(filename);
-    this.database.exec('PRAGMA busy_timeout = 5000');
-    this.readStatement = this.database.prepare(`
-      SELECT findings_markdown AS findingsMarkdown
-      FROM goals
-      WHERE id = ?
-    `);
-    this.updateStatement = this.database.prepare(`
-      UPDATE goals
-      SET findings_markdown = ?, updated_at = ?
-      WHERE id = ?
+    this.database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
     `);
   }
 
-  read() {
-    return this.readStatement.get(this.goalId)?.findingsMarkdown ?? null;
+  list() {
+    return this.database
+      .prepare(`
+        SELECT id, title, html, created_at AS createdAt, updated_at AS updatedAt
+        FROM artifacts
+        WHERE goal_id = ?
+        ORDER BY created_at, id
+      `)
+      .all(this.goalId)
+      .map((row) => ({ ...row }));
   }
 
-  update(markdown) {
-    if (typeof markdown !== 'string' || markdown.length > MAX_FINDINGS_LENGTH) {
-      throw new Error('The findings Markdown is invalid.');
+  create({ title, html }) {
+    this.validateTitle(title);
+    this.validateHtml(html);
+    if (!this.goalExists()) {
+      return null;
     }
 
-    return (
-      this.updateStatement.run(markdown, new Date().toISOString(), this.goalId)
-        .changes > 0
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.database
+      .prepare(`
+        INSERT INTO artifacts (id, goal_id, title, html, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(id, this.goalId, title, html, now, now);
+    this.touchGoal(now);
+    return this.get(id);
+  }
+
+  update(id, fields) {
+    this.validateId(id);
+    if (fields.title === undefined && fields.html === undefined) {
+      throw new Error('An artifact update must change the title or HTML.');
+    }
+    if (fields.title !== undefined) this.validateTitle(fields.title);
+    if (fields.html !== undefined) this.validateHtml(fields.html);
+
+    const artifact = this.get(id);
+    if (!artifact) return null;
+    const now = new Date().toISOString();
+    this.database
+      .prepare(`
+        UPDATE artifacts SET title = ?, html = ?, updated_at = ?
+        WHERE id = ? AND goal_id = ?
+      `)
+      .run(
+        fields.title ?? artifact.title,
+        fields.html ?? artifact.html,
+        now,
+        id,
+        this.goalId,
+      );
+    this.touchGoal(now);
+    return this.get(id);
+  }
+
+  remove(id) {
+    this.validateId(id);
+    const result = this.database
+      .prepare('DELETE FROM artifacts WHERE id = ? AND goal_id = ?')
+      .run(id, this.goalId);
+    if (result.changes > 0) this.touchGoal(new Date().toISOString());
+    return result.changes > 0;
+  }
+
+  get(id) {
+    const row = this.database
+      .prepare(`
+        SELECT id, title, html, created_at AS createdAt, updated_at AS updatedAt
+        FROM artifacts WHERE id = ? AND goal_id = ?
+      `)
+      .get(id, this.goalId);
+    return row ? { ...row } : null;
+  }
+
+  goalExists() {
+    return Boolean(
+      this.database
+        .prepare('SELECT 1 FROM goals WHERE id = ?')
+        .get(this.goalId),
     );
+  }
+
+  touchGoal(now) {
+    this.database
+      .prepare('UPDATE goals SET updated_at = ? WHERE id = ?')
+      .run(now, this.goalId);
+  }
+
+  validateId(id) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 100) {
+      throw new Error('The artifact ID is invalid.');
+    }
+  }
+
+  validateTitle(title) {
+    if (
+      typeof title !== 'string' ||
+      title.trim().length === 0 ||
+      title.length > MAX_ARTIFACT_TITLE_LENGTH
+    ) {
+      throw new Error('The artifact title is invalid.');
+    }
+  }
+
+  validateHtml(html) {
+    if (typeof html !== 'string' || html.length > MAX_ARTIFACT_HTML_LENGTH) {
+      throw new Error('The artifact HTML is invalid.');
+    }
   }
 
   close() {
@@ -283,26 +375,105 @@ class TasksRepository {
 }
 
 async function startServer({ databasePath, goalId }) {
-  const repository = new FindingsRepository(databasePath, goalId);
+  const artifacts = new ArtifactsRepository(databasePath, goalId);
   const tasks = new TasksRepository(databasePath, goalId);
-  const server = new McpServer({ name: 'rba-findings', version: '1.0.0' });
+  const server = new McpServer({ name: 'rba-planner', version: '1.0.0' });
 
   server.registerTool(
-    'read_findings',
+    'list_artifacts',
     {
-      title: 'Read findings',
-      description:
-        "Read the active goal's current findings Markdown before revising it.",
+      title: 'List artifacts',
+      description: "List the active goal's saved HTML artifacts.",
       annotations: { readOnlyHint: true },
     },
-    async () => ({
-      content: [
-        {
-          type: 'text',
-          text: repository.read() ?? '(the findings document is empty)',
-        },
-      ],
-    }),
+    async () => {
+      const current = artifacts.list();
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              current.length === 0
+                ? '(there are no artifacts)'
+                : JSON.stringify(current, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_artifact',
+    {
+      title: 'Create artifact',
+      description: 'Save a new HTML artifact requested by the user.',
+      inputSchema: {
+        title: z.string().min(1).max(MAX_ARTIFACT_TITLE_LENGTH),
+        html: z.string().max(MAX_ARTIFACT_HTML_LENGTH),
+      },
+      annotations: { destructiveHint: false },
+    },
+    async ({ title, html }) => {
+      const artifact = artifacts.create({ title, html });
+      return artifact
+        ? {
+            content: [
+              {
+                type: 'text',
+                text: `Created artifact ${artifact.title} (${artifact.id}).`,
+              },
+            ],
+          }
+        : {
+            content: [{ type: 'text', text: 'The goal no longer exists.' }],
+            isError: true,
+          };
+    },
+  );
+
+  server.registerTool(
+    'update_artifact',
+    {
+      title: 'Update artifact',
+      description:
+        'Replace the title or HTML of a saved artifact. List artifacts first.',
+      inputSchema: {
+        id: z.string().min(1).max(100),
+        title: z.string().min(1).max(MAX_ARTIFACT_TITLE_LENGTH).optional(),
+        html: z.string().max(MAX_ARTIFACT_HTML_LENGTH).optional(),
+      },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ id, title, html }) => {
+      const artifact = artifacts.update(id, { title, html });
+      return artifact
+        ? {
+            content: [
+              { type: 'text', text: `Updated artifact ${artifact.title}.` },
+            ],
+          }
+        : {
+            content: [{ type: 'text', text: 'The artifact no longer exists.' }],
+            isError: true,
+          };
+    },
+  );
+
+  server.registerTool(
+    'remove_artifact',
+    {
+      title: 'Remove artifact',
+      description: 'Remove a saved artifact. List artifacts first.',
+      inputSchema: { id: z.string().min(1).max(100) },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ id }) =>
+      artifacts.remove(id)
+        ? { content: [{ type: 'text', text: 'Artifact removed.' }] }
+        : {
+            content: [{ type: 'text', text: 'The artifact no longer exists.' }],
+            isError: true,
+          },
   );
 
   server.registerTool(
@@ -440,37 +611,9 @@ async function startServer({ databasePath, goalId }) {
     },
   );
 
-  server.registerTool(
-    'update_findings',
-    {
-      title: 'Update findings',
-      description:
-        "Replace the active goal's findings with the complete revised Markdown document.",
-      inputSchema: {
-        markdown: z
-          .string()
-          .max(MAX_FINDINGS_LENGTH)
-          .describe('The full findings document in Markdown'),
-      },
-      annotations: { destructiveHint: true, idempotentHint: true },
-    },
-    async ({ markdown }) => {
-      if (!repository.update(markdown)) {
-        return {
-          content: [{ type: 'text', text: 'The goal no longer exists.' }],
-          isError: true,
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: 'Findings updated.' }],
-      };
-    },
-  );
-
   const shutdown = async () => {
     await server.close();
-    repository.close();
+    artifacts.close();
     tasks.close();
   };
   process.once('SIGINT', () => void shutdown());
@@ -490,9 +633,10 @@ if (require.main === module) {
 }
 
 module.exports = {
-  FindingsRepository,
+  ArtifactsRepository,
   TasksRepository,
-  MAX_FINDINGS_LENGTH,
+  MAX_ARTIFACT_HTML_LENGTH,
+  MAX_ARTIFACT_TITLE_LENGTH,
   MAX_TASK_SPEC_LENGTH,
   MAX_TASK_TITLE_LENGTH,
   startServer,

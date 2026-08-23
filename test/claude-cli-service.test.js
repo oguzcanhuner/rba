@@ -67,11 +67,7 @@ test('streams text from Claude CLI JSON output', async () => {
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /do not ask permission before updating findings/,
-  );
-  assert.match(
-    invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /Skip an update only when the turn produced no durable new understanding/,
+    /only when the user explicitly asks for one/,
   );
   assert.equal(
     invocation.args[invocation.args.indexOf('--allowedTools') + 1],
@@ -79,8 +75,10 @@ test('streams text from Claude CLI JSON output', async () => {
       'Bash',
       'WebSearch',
       'WebFetch',
-      'mcp__rba__read_findings',
-      'mcp__rba__update_findings',
+      'mcp__rba__list_artifacts',
+      'mcp__rba__create_artifact',
+      'mcp__rba__update_artifact',
+      'mcp__rba__remove_artifact',
       'mcp__rba__read_tasks',
       'mcp__rba__add_task',
       'mcp__rba__update_task',

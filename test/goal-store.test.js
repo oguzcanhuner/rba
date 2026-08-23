@@ -12,7 +12,7 @@ function goal(overrides = {}) {
     title: 'Plan persistent conversations',
     workingDirectory: '/workspace',
     agentSession: null,
-    findingsMarkdown: null,
+    artifacts: [],
     tasks: [],
     messages: [
       {
@@ -111,17 +111,6 @@ test('stores provider-neutral agent sessions and message updates', () => {
   store.close();
 });
 
-test('persists findings as part of a goal', () => {
-  const store = new GoalStore(':memory:');
-  store.save(goal({ findingsMarkdown: '# Findings\n\nA durable decision.' }));
-
-  assert.equal(
-    store.get('goal-1').findingsMarkdown,
-    '# Findings\n\nA durable decision.',
-  );
-  store.close();
-});
-
 test('lists tasks with stable sequence order and commits drafts', () => {
   const store = new GoalStore(':memory:');
   store.save(goal());
@@ -214,7 +203,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 8],
   );
   store.close();
 });
@@ -246,7 +235,6 @@ test('repairs a missing findings column even when migration 2 is marked complete
   oldDatabase.close();
 
   const store = new GoalStore(filename);
-  assert.equal(store.get('existing').findingsMarkdown, null);
   assert.equal(
     store.database
       .prepare('PRAGMA table_info(goals)')
@@ -259,7 +247,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 8],
   );
   store.close();
 });

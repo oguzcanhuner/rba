@@ -42,7 +42,7 @@ export function goalTitle(message: string) {
 export function summaryOf(goal: Goal): GoalSummary {
   const {
     agentSession: _agentSession,
-    findingsMarkdown: _findingsMarkdown,
+    artifacts: _artifacts,
     messages: _messages,
     ...summary
   } = goal;
