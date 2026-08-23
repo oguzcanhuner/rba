@@ -208,7 +208,9 @@ async function startClaudeRequest(event, request) {
     return;
   }
 
-  if (activeRequests.has(event.sender.id)) {
+  const activeRequestKey = `${event.sender.id}:${request.goalId}`;
+
+  if (activeRequests.has(activeRequestKey)) {
     sendClaudeEvent(event.sender, {
       type: 'error',
       requestId: request.requestId,
@@ -219,10 +221,11 @@ async function startClaudeRequest(event, request) {
 
   const activeRequest = {
     requestId: request.requestId,
+    goalId: request.goalId,
     cancelled: false,
     cancel: () => {},
   };
-  activeRequests.set(event.sender.id, activeRequest);
+  activeRequests.set(activeRequestKey, activeRequest);
 
   try {
     const cwd = await validatedDirectory(request.cwd);
@@ -348,8 +351,8 @@ async function startClaudeRequest(event, request) {
         : { message: readableClaudeError(error) }),
     });
   } finally {
-    if (activeRequests.get(event.sender.id) === activeRequest) {
-      activeRequests.delete(event.sender.id);
+    if (activeRequests.get(activeRequestKey) === activeRequest) {
+      activeRequests.delete(activeRequestKey);
     }
   }
 }
@@ -358,12 +361,12 @@ ipcMain.on('claude:start', (event, request) => {
   void startClaudeRequest(event, request);
 });
 
-ipcMain.on('claude:cancel', (event, requestId) => {
+ipcMain.on('claude:cancel', (event, requestId, goalId) => {
   if (!isTrustedSender(event.senderFrame)) {
     return;
   }
 
-  const activeRequest = activeRequests.get(event.sender.id);
+  const activeRequest = activeRequests.get(`${event.sender.id}:${goalId}`);
 
   if (activeRequest?.requestId === requestId) {
     activeRequest.cancelled = true;
@@ -522,8 +525,13 @@ function createWindow() {
 
   const webContentsId = window.webContents.id;
   window.webContents.once('destroyed', () => {
-    activeRequests.get(webContentsId)?.cancel();
-    activeRequests.delete(webContentsId);
+    const prefix = `${webContentsId}:`;
+    for (const [key, activeRequest] of activeRequests) {
+      if (key.startsWith(prefix)) {
+        activeRequest.cancel();
+        activeRequests.delete(key);
+      }
+    }
   });
 
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;

@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron/renderer');
 
 contextBridge.exposeInMainWorld('claude', {
   start: (request) => ipcRenderer.send('claude:start', request),
-  cancel: (requestId) => ipcRenderer.send('claude:cancel', requestId),
+  cancel: (requestId, goalId) =>
+    ipcRenderer.send('claude:cancel', requestId, goalId),
   getDefaultDirectory: () => ipcRenderer.invoke('claude:get-default-directory'),
   pickDirectory: () => ipcRenderer.invoke('claude:pick-directory'),
   onEvent: (callback) => {

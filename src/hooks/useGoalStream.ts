@@ -239,10 +239,10 @@ export function useGoalStream({
   }, []);
 
   const cancel = useCallback(() => {
-    if (activeRequestId) {
-      window.claude.cancel(activeRequestId);
+    if (activeRequestId && activeGoalId) {
+      window.claude.cancel(activeRequestId, activeGoalId);
     }
-  }, [activeRequestId]);
+  }, [activeRequestId, activeGoalId]);
 
   return {
     queued,

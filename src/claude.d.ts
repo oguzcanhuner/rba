@@ -146,7 +146,7 @@ declare global {
   interface Window {
     claude: {
       start(request: ClaudeStartRequest): void;
-      cancel(requestId: string): void;
+      cancel(requestId: string, goalId: string): void;
       getDefaultDirectory(): Promise<string>;
       pickDirectory(): Promise<string | null>;
       onEvent(callback: (event: ClaudeStreamEvent) => void): () => void;
