@@ -3,7 +3,6 @@ const { realpath, stat } = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
-const { renderArtifactDocument } = require('./artifact-document');
 const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
 
@@ -39,7 +38,7 @@ function registerArtifactProtocol() {
     }
     const artifact = goalStore.getArtifact(id);
     return artifact
-      ? artifactResponse(200, renderArtifactDocument(artifact.html))
+      ? artifactResponse(200, artifact.html)
       : artifactResponse(404, '<h1>Artifact not found</h1>');
   });
 }
