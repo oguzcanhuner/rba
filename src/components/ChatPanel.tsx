@@ -14,7 +14,7 @@ type ChatPanelProps = {
   queued: QueuedMessage[];
   workingDirectory: string | null;
   error: string | null;
-  isBusy: boolean;
+  isActiveGoalBusy: boolean;
   onDraftChange: (draft: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
@@ -30,7 +30,7 @@ export function ChatPanel({
   queued,
   workingDirectory,
   error,
-  isBusy,
+  isActiveGoalBusy,
   onDraftChange,
   onSubmit,
   onCancel,
@@ -71,7 +71,7 @@ export function ChatPanel({
         queued={queued}
         workingDirectory={workingDirectory}
         error={error}
-        isBusy={isBusy}
+        isActiveGoalBusy={isActiveGoalBusy}
         onDraftChange={onDraftChange}
         onSubmit={onSubmit}
         onCancel={onCancel}

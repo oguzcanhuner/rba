@@ -256,7 +256,9 @@
 }
 
 .goal-list .goal-list__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   height: auto;
   margin-bottom: 2px;
@@ -267,8 +269,31 @@
   font-weight: 400;
   line-height: 1.35;
   text-align: left;
+}
+
+.goal-list__title {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.goal-list__busy-indicator {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sidebar-accent-foreground, currentColor);
+  animation: goal-list__busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes goal-list__busy-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .goal-list .goal-list__item[aria-current="page"] {

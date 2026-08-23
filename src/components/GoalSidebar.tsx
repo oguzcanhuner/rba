@@ -8,7 +8,8 @@ type GoalSidebarProps = {
   tasks: SidebarTask[];
   activeGoalId: string | null;
   isCollapsed: boolean;
-  isBusy: boolean;
+  /** Goals with a turn currently streaming, whether or not displayed. */
+  busyGoalIds: Set<string>;
   onToggleCollapse: () => void;
   onNewGoal: () => void;
   onSelectGoal: (id: string) => void;
@@ -20,7 +21,7 @@ export function GoalSidebar({
   tasks,
   activeGoalId,
   isCollapsed,
-  isBusy,
+  busyGoalIds,
   onToggleCollapse,
   onNewGoal,
   onSelectGoal,
@@ -39,7 +40,6 @@ export function GoalSidebar({
             <Button
               type="button"
               size="icon-sm"
-              disabled={isBusy}
               aria-label="New goal"
               title="New goal"
               onClick={onNewGoal}
@@ -83,12 +83,20 @@ export function GoalSidebar({
                   type="button"
                   variant="ghost"
                   key={goal.id}
-                  disabled={isBusy}
                   aria-current={goal.id === activeGoalId ? 'page' : undefined}
+                  aria-busy={busyGoalIds.has(goal.id)}
                   title={goal.title}
                   onClick={() => onSelectGoal(goal.id)}
                 >
-                  {goal.title}
+                  <span className="goal-list__title">{goal.title}</span>
+                  {busyGoalIds.has(goal.id) && (
+                    <span
+                      className="goal-list__busy-indicator"
+                      role="status"
+                      aria-label="Working"
+                      title="Working"
+                    />
+                  )}
                 </Button>
               ))
             )}

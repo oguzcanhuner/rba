@@ -8,7 +8,7 @@ type ComposerProps = {
   queued: QueuedMessage[];
   workingDirectory: string | null;
   error: string | null;
-  isBusy: boolean;
+  isActiveGoalBusy: boolean;
   onDraftChange: (draft: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
@@ -32,7 +32,7 @@ export function Composer({
   queued,
   workingDirectory,
   error,
-  isBusy,
+  isActiveGoalBusy,
   onDraftChange,
   onSubmit,
   onCancel,
@@ -50,7 +50,7 @@ export function Composer({
           type="button"
           variant="ghost"
           size="xs"
-          disabled={isBusy}
+          disabled={isActiveGoalBusy}
           onClick={onChooseDirectory}
         >
           Choose folder
@@ -81,15 +81,15 @@ export function Composer({
           aria-label="Message RBA"
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isBusy ? 'Steer RBA…' : 'Message RBA'}
+          placeholder={isActiveGoalBusy ? 'Steer RBA…' : 'Message RBA'}
           rows={3}
           value={draft}
         />
         <div className="composer__actions">
           <Button type="submit" disabled={!draft.trim()}>
-            {isBusy ? 'Queue' : 'Send'}
+            {isActiveGoalBusy ? 'Queue' : 'Send'}
           </Button>
-          {isBusy && (
+          {isActiveGoalBusy && (
             <Button type="button" variant="secondary" onClick={onCancel}>
               Stop
             </Button>
@@ -97,7 +97,7 @@ export function Composer({
         </div>
       </form>
       <p className="composer-hint">
-        {isBusy
+        {isActiveGoalBusy
           ? 'Enter to queue · sends when the current turn finishes'
           : 'Enter to send · Shift+Enter for a new line'}
       </p>

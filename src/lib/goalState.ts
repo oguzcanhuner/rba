@@ -68,6 +68,20 @@ export function restoreInterruptedMessages(goal: Goal): Goal {
   };
 }
 
+/** Finds which goal a stream event belongs to from the goalId -> requestId
+ * map of in-flight turns, since ClaudeStreamEvent only carries a requestId. */
+export function goalIdForRequest(
+  busyRequests: Map<string, string>,
+  requestId: string,
+): string | null {
+  for (const [goalId, activeRequestId] of busyRequests) {
+    if (activeRequestId === requestId) {
+      return goalId;
+    }
+  }
+  return null;
+}
+
 export function updateAssistant(
   goal: Goal,
   requestId: string,
