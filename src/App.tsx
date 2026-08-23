@@ -470,7 +470,7 @@ export function App() {
               queued={queuedMessages}
               workingDirectory={workingDirectory}
               error={error}
-              isBusy={activeRequestId !== null}
+              isActiveGoalBusy={activeRequestId !== null}
               onDraftChange={setDraft}
               onSubmit={submitMessage}
               onCancel={cancelResponse}
