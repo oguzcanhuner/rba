@@ -111,12 +111,12 @@ export function GoalSidebar({
                     title={task.title}
                     onClick={() => onOpenTask(task)}
                   >
-                    <span className="sidebar-task__title">{task.title}</span>
                     <span
                       className={`sidebar-task__status task__status task__status--${task.status}`}
-                    >
-                      {task.status}
-                    </span>
+                      aria-hidden="true"
+                    />
+                    <span className="sr-only">{task.status}</span>
+                    <span className="sidebar-task__title">{task.title}</span>
                     <span className="sidebar-task__goal">{task.goalTitle}</span>
                   </Button>
                 ))}

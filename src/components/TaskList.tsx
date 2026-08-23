@@ -53,10 +53,11 @@ export function TaskList<T extends Task>({
           {tasks.map((task) => (
             <details className="task" key={task.id}>
               <summary className="task__summary">
-                <span className="task__sequence">{task.sequence}</span>
-                <span className={`task__status task__status--${task.status}`}>
-                  {task.status}
-                </span>
+                <span
+                  className={`task__status task__status--${task.status}`}
+                  aria-hidden="true"
+                />
+                <span className="sr-only">{task.status}</span>
                 <span className="task__title">{task.title}</span>
               </summary>
               <div className="task__spec">

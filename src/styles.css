@@ -11,7 +11,8 @@
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url("./assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  src: url("./assets/fonts/inter-latin-wght-normal.woff2")
+    format("woff2-variations");
 }
 
 @font-face {
@@ -19,7 +20,8 @@
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url("./assets/fonts/archivo-latin-wght-normal.woff2") format("woff2-variations");
+  src: url("./assets/fonts/archivo-latin-wght-normal.woff2")
+    format("woff2-variations");
 }
 
 @font-face {
@@ -27,16 +29,16 @@
   font-style: normal;
   font-display: swap;
   font-weight: 100 800;
-  src: url("./assets/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+  src: url("./assets/fonts/jetbrains-mono-latin-wght-normal.woff2")
+    format("woff2-variations");
 }
 
 :root {
   color-scheme: light;
   font-synthesis: none;
-  /* Warm cream light ramp (herdr docs palette) with dark, near-black body
-     text for full contrast. */
+  /* Warm cream light ramp and softer body text from the Herdr docs palette. */
   --background: #efece5;
-  --foreground: #15140f;
+  --foreground: #55534a;
   --card: #e7e3da;
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -59,7 +61,7 @@
   --chart-4: #ea580c;
   --chart-5: #db2777;
   --radius: 0.625rem;
-  --sidebar: #efece5;
+  --sidebar: #e7e3da;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -270,6 +272,7 @@
 }
 
 .goal-list .goal-list__item[aria-current="page"] {
+  border-left: 2px solid var(--sidebar-primary);
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
   font-weight: 500;
@@ -303,7 +306,8 @@
 
 .sidebar-task-list .sidebar-task {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
   width: 100%;
   height: auto;
   padding: 8px;
@@ -325,9 +329,7 @@
 }
 
 .sidebar-task__status {
-  margin-left: 8px;
-  align-self: center;
-  font-size: 0.5625rem;
+  margin-right: 8px;
 }
 
 .sidebar-task__goal {
@@ -344,8 +346,7 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  /* The conversation column sits on the mantle tint, a step cooler than the
-     white findings pane beside it. */
+  /* The conversation column sits on the warm paper background. */
   background: var(--muted);
 }
 
@@ -373,8 +374,7 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  /* Catppuccin Latte base: the pane sits on white. */
-  background: #fff;
+  background: var(--background);
 }
 
 .findings__header {
@@ -400,13 +400,12 @@
   padding: 12px;
 }
 
-/* The findings document sits in an inset card: rounded, hairline border, and a
-   subtle shadow on the white base. */
+/* The findings document sits in an inset card with the shared paper surface. */
 .findings__document {
   padding: 12px 16px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-lg);
-  background: #fff;
+  background: var(--background);
   box-shadow: 0 1px 2px rgb(76 79 105 / 6%);
 }
 
@@ -582,14 +581,14 @@
   min-height: 0;
   overflow-y: auto;
   padding: 12px;
-  background: #fff;
+  background: var(--background);
 }
 
 .planning-section {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: #fff;
+  background: var(--background);
   box-shadow: 0 1px 2px rgb(76 79 105 / 6%);
 }
 
@@ -673,7 +672,7 @@
   height: calc(100vh - 96px);
   min-height: 520px;
   border: 0;
-  background: #fff;
+  background: var(--background);
 }
 
 .planning-section .tasks {
@@ -699,7 +698,7 @@
 
 .task__summary {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
@@ -712,7 +711,7 @@
 }
 
 .task__summary::after {
-  grid-column: 4;
+  grid-column: 3;
   color: var(--muted-foreground);
   content: "\203A";
   font-size: 1rem;
@@ -728,51 +727,51 @@
   background: var(--accent);
 }
 
-.task__sequence {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-}
-
 .task__status {
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted-foreground);
 }
 
 .task__status--draft {
-  background: color-mix(in srgb, var(--status-running) 16%, transparent);
-  color: var(--status-running);
+  background: var(--muted-foreground);
 }
 
 .task__status--queued {
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  color: var(--primary);
+  background: var(--muted-foreground);
 }
 
 .task__status--working {
-  background: color-mix(in srgb, var(--status-running) 16%, transparent);
-  color: var(--status-running);
+  background: var(--ring);
+  animation: task-status-pulse 1.5s ease-out infinite;
 }
 
 .task__status--completed {
-  background: color-mix(in srgb, var(--status-success) 16%, transparent);
-  color: var(--status-success);
+  background: var(--status-success);
 }
 
 .task__status--stopped,
 .task__status--failed {
-  background: color-mix(in srgb, var(--status-danger) 14%, transparent);
-  color: var(--status-danger);
+  background: var(--status-danger);
+}
+
+@keyframes task-status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ring) 55%, transparent);
+  }
+
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task__status--working {
+    animation: none;
+  }
 }
 
 .task__title {
