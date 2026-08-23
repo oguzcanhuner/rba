@@ -173,16 +173,10 @@ test('allows concurrent in-flight requests for different goals', async () => {
   const sent = [];
   event.sender.send = (channel, payload) => sent.push(payload);
 
-  startHandler(
-    event,
-    baseRequest({ requestId: 'req-a', goalId: 'goal-a' }),
-  );
+  startHandler(event, baseRequest({ requestId: 'req-a', goalId: 'goal-a' }));
   await waitFor(() => calls.length >= 1);
 
-  startHandler(
-    event,
-    baseRequest({ requestId: 'req-b', goalId: 'goal-b' }),
-  );
+  startHandler(event, baseRequest({ requestId: 'req-b', goalId: 'goal-b' }));
   await waitFor(() => calls.length >= 2);
 
   const rejections = sent.filter((payload) => payload.type === 'error');
@@ -213,16 +207,10 @@ test('cancelling one goal does not cancel another goal in-flight request', async
   const event = fakeEvent(1);
   event.sender.send = () => {};
 
-  startHandler(
-    event,
-    baseRequest({ requestId: 'req-a', goalId: 'goal-a' }),
-  );
+  startHandler(event, baseRequest({ requestId: 'req-a', goalId: 'goal-a' }));
   await waitFor(() => calls.length >= 1);
 
-  startHandler(
-    event,
-    baseRequest({ requestId: 'req-b', goalId: 'goal-b' }),
-  );
+  startHandler(event, baseRequest({ requestId: 'req-b', goalId: 'goal-b' }));
   await waitFor(() => calls.length >= 2);
 
   cancelHandler(event, 'req-a', 'goal-a');
