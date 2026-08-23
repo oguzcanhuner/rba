@@ -37,19 +37,3 @@ contextBridge.exposeInMainWorld('workers', {
     return () => ipcRenderer.removeListener('workers:event', listener);
   },
 });
-
-contextBridge.exposeInMainWorld('workflows', {
-  list: (taskId) => ipcRenderer.invoke('workflows:list', taskId),
-  get: (taskId) => ipcRenderer.invoke('workflows:get', taskId),
-  start: (taskId, sourcePath) =>
-    ipcRenderer.invoke('workflows:start', taskId, sourcePath),
-  resolve: (runId, key, value) =>
-    ipcRenderer.invoke('workflows:resolve', runId, key, value),
-  stop: (runId) => ipcRenderer.invoke('workflows:stop', runId),
-  diff: (taskId) => ipcRenderer.invoke('workflows:diff', taskId),
-  onEvent: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on('workflows:event', listener);
-    return () => ipcRenderer.removeListener('workflows:event', listener);
-  },
-});

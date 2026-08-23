@@ -14,7 +14,6 @@ import sql from 'highlight.js/lib/languages/sql';
 import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
-import { createElement, type ReactNode } from 'react';
 
 hljs.registerLanguage('javascript', javascript);
 hljs.registerLanguage('typescript', typescript);
@@ -81,57 +80,6 @@ export function highlightLine(code: string, language: string | null) {
   } catch {
     return escapeHtml(code);
   }
-}
-
-export function highlightedNodes(html: string): ReactNode[] {
-  type HighlightNode = {
-    children: Array<HighlightNode | string>;
-    className: string | null;
-  };
-  const root: HighlightNode = { children: [], className: null };
-  const stack = [root];
-  const tags = /<span class="([^"]+)">|<\/span>/g;
-  let position = 0;
-
-  for (const match of html.matchAll(tags)) {
-    const index = match.index ?? position;
-    if (index > position) {
-      stack.at(-1)?.children.push(decodeEntities(html.slice(position, index)));
-    }
-    if (match[1]) {
-      const node: HighlightNode = { children: [], className: match[1] };
-      stack.at(-1)?.children.push(node);
-      stack.push(node);
-    } else if (stack.length > 1) {
-      stack.pop();
-    }
-    position = index + match[0].length;
-  }
-  if (position < html.length) {
-    stack.at(-1)?.children.push(decodeEntities(html.slice(position)));
-  }
-
-  function renderNode(node: HighlightNode | string, key: number): ReactNode {
-    return typeof node === 'string'
-      ? node
-      : createElement(
-          'span',
-          { className: node.className ?? undefined, key },
-          node.children.map(renderNode),
-        );
-  }
-
-  return root.children.map(renderNode);
-}
-
-function decodeEntities(value: string) {
-  return value
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#x27;', "'")
-    .replaceAll('&#39;', "'")
-    .replaceAll('&amp;', '&');
 }
 
 function escapeHtml(value: string) {

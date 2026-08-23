@@ -67,15 +67,11 @@ test('streams text from Claude CLI JSON output', async () => {
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /do not ask permission before updating the audit/,
+    /do not ask permission before updating findings/,
   );
   assert.match(
     invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /Skip an update only when the turn produced no relevant tests/,
-  );
-  assert.match(
-    invocation.args[invocation.args.indexOf('--append-system-prompt') + 1],
-    /smallest set of tests that directly describe current observable behavior/,
+    /Skip an update only when the turn produced no durable new understanding/,
   );
   assert.equal(
     invocation.args[invocation.args.indexOf('--allowedTools') + 1],
@@ -83,10 +79,13 @@ test('streams text from Claude CLI JSON output', async () => {
       'Bash',
       'WebSearch',
       'WebFetch',
-      'mcp__rba__read_artifacts',
-      'mcp__rba__add_test_trace',
-      'mcp__rba__remove_artifact',
-      'mcp__rba__read_plan',
+      'mcp__rba__read_findings',
+      'mcp__rba__update_findings',
+      'mcp__rba__read_tasks',
+      'mcp__rba__add_task',
+      'mcp__rba__update_task',
+      'mcp__rba__remove_task',
+      'mcp__rba__commit_tasks',
     ].join(','),
   );
   const mcpConfig = JSON.parse(
@@ -265,34 +264,4 @@ test('starts an autonomous worker with write and command tools', async () => {
   assert.deepEqual(await response.completion, {
     sessionId: 'worker-session',
   });
-});
-
-test('starts a read-only review agent without editing tools', async () => {
-  const child = fakeProcess();
-  let args;
-  const response = beginWorkerCli({
-    prompt: 'Review the diff',
-    cwd: '/worktree',
-    mode: 'read',
-    onText: () => {},
-    spawnProcess: (_command, receivedArgs) => {
-      args = receivedArgs;
-      return child;
-    },
-  });
-
-  assert.equal(args[args.indexOf('--tools') + 1], 'Glob,Grep,Read,Bash');
-  assert.match(
-    args[args.indexOf('--append-system-prompt') + 1],
-    /without changing files/,
-  );
-  child.stdout.write(
-    `${JSON.stringify({
-      type: 'result',
-      subtype: 'success',
-      session_id: 'review-session',
-    })}\n`,
-  );
-  child.emit('close', 0);
-  assert.deepEqual(await response.completion, { sessionId: 'review-session' });
 });

@@ -31,9 +31,9 @@ export type ClaudeStreamEvent =
       tool: { id: string; isError: boolean };
     }
   | {
-      type: 'audit-updated';
+      type: 'findings-updated';
       requestId: string;
-      artifacts: AuditArtifact[];
+      markdown: string;
     }
   | {
       type: 'tasks-updated';
@@ -86,28 +86,6 @@ export type GoalSummary = {
   updatedAt: string;
 };
 
-export type TestTraceAssertion = {
-  name: string;
-  status: string;
-  durationMs: number | null;
-  location: { line: number; column: number } | null;
-  failures: string[];
-};
-
-export type TestTraceArtifact = {
-  id: string;
-  kind: 'test-trace';
-  framework: string;
-  testPath: string;
-  testName: string | null;
-  createdAt: string;
-  success: boolean;
-  durationMs: number;
-  assertions: TestTraceAssertion[];
-};
-
-export type AuditArtifact = TestTraceArtifact;
-
 export type TaskStatus =
   | 'draft'
   | 'queued'
@@ -134,8 +112,6 @@ export type SidebarTask = Task & {
 export type Goal = GoalSummary & {
   agentSession: AgentSession | null;
   findingsMarkdown: string | null;
-  auditArtifacts: AuditArtifact[];
-  planMarkdown: string | null;
   messages: DisplayMessage[];
 };
 
@@ -162,51 +138,6 @@ export type WorkerDiff = { patch: string };
 
 export type WorkerEvent = { type: 'worker-updated'; run: WorkerRun };
 
-export type WorkflowDefinition = { name: string; path: string };
-export type WorkflowStatus =
-  | 'running'
-  | 'waiting'
-  | 'completed'
-  | 'failed'
-  | 'stopped';
-export type WorkflowOperation = {
-  id: string;
-  runId: string;
-  key: string;
-  type: 'agent' | 'command' | 'human' | 'sleep';
-  status: 'running' | 'waiting' | 'completed' | 'failed';
-  attempt: number;
-  input: Record<string, unknown>;
-  output: unknown;
-  error: string | null;
-  startedAt: string;
-  updatedAt: string;
-  finishedAt: string | null;
-  messages: DisplayMessage[];
-};
-export type WorkflowRun = {
-  id: string;
-  taskId: string;
-  workflowName: string;
-  sourcePath: string;
-  sourceHash: string;
-  branch: string | null;
-  worktree: string | null;
-  baseRevision: string | null;
-  status: WorkflowStatus;
-  input: Record<string, unknown>;
-  output: unknown;
-  error: string | null;
-  startedAt: string;
-  updatedAt: string;
-  finishedAt: string | null;
-  operations: WorkflowOperation[];
-};
-export type WorkflowEvent = {
-  type: 'workflow-updated';
-  run: WorkflowRun;
-};
-
 declare global {
   interface Window {
     claude: {
@@ -232,15 +163,6 @@ declare global {
       send(taskId: string, prompt: string): Promise<WorkerRun>;
       diff(taskId: string): Promise<WorkerDiff>;
       onEvent(callback: (event: WorkerEvent) => void): () => void;
-    };
-    workflows: {
-      list(taskId: string): Promise<WorkflowDefinition[]>;
-      get(taskId: string): Promise<WorkflowRun | null>;
-      start(taskId: string, sourcePath: string): Promise<WorkflowRun>;
-      resolve(runId: string, key: string, value: unknown): Promise<WorkflowRun>;
-      stop(runId: string): Promise<WorkflowRun>;
-      diff(taskId: string): Promise<WorkerDiff>;
-      onEvent(callback: (event: WorkflowEvent) => void): () => void;
     };
   }
 }

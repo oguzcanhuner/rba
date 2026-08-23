@@ -5,16 +5,11 @@ const { pathToFileURL } = require('node:url');
 const { beginClaudeCli } = require('./claude-cli-service');
 const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
-const { listWorkflows } = require('./workflow-discovery');
-const { WorkflowService } = require('./workflow-service');
-const { WorkflowStore } = require('./workflow-store');
 
 const activeRequests = new Map();
 let goalStore;
 let goalDatabase;
 let workerService;
-let workflowService;
-let workflowStore;
 
 function sendClaudeEvent(webContents, payload) {
   if (!webContents.isDestroyed()) {
@@ -26,17 +21,6 @@ function broadcastWorker(run) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) {
       window.webContents.send('workers:event', { type: 'worker-updated', run });
-    }
-  }
-}
-
-function broadcastWorkflow(run) {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.webContents.isDestroyed()) {
-      window.webContents.send('workflows:event', {
-        type: 'workflow-updated',
-        run,
-      });
     }
   }
 }
@@ -82,51 +66,6 @@ function isValidStartRequest(request) {
 }
 
 function isValidGoal(goal) {
-  const auditArtifactsJson = Array.isArray(goal?.auditArtifacts)
-    ? JSON.stringify(goal.auditArtifacts)
-    : '';
-  const validAuditArtifacts =
-    Array.isArray(goal?.auditArtifacts) &&
-    goal.auditArtifacts.length <= 200 &&
-    auditArtifactsJson.length <= 500_000 &&
-    goal.auditArtifacts.every(
-      (artifact) =>
-        artifact &&
-        typeof artifact.id === 'string' &&
-        artifact.id.length > 0 &&
-        artifact.id.length <= 100 &&
-        artifact.kind === 'test-trace' &&
-        typeof artifact.framework === 'string' &&
-        artifact.framework.length > 0 &&
-        artifact.framework.length <= 100 &&
-        typeof artifact.testPath === 'string' &&
-        artifact.testPath.length > 0 &&
-        artifact.testPath.length <= 4096 &&
-        (artifact.testName === null ||
-          (typeof artifact.testName === 'string' &&
-            artifact.testName.length <= 500)) &&
-        typeof artifact.createdAt === 'string' &&
-        typeof artifact.success === 'boolean' &&
-        Number.isFinite(artifact.durationMs) &&
-        Array.isArray(artifact.assertions) &&
-        artifact.assertions.length <= 10_000 &&
-        artifact.assertions.every(
-          (assertion) =>
-            assertion &&
-            typeof assertion.name === 'string' &&
-            assertion.name.length <= 2_000 &&
-            typeof assertion.status === 'string' &&
-            assertion.status.length <= 100 &&
-            (assertion.durationMs === null ||
-              Number.isFinite(assertion.durationMs)) &&
-            Array.isArray(assertion.failures) &&
-            assertion.failures.length <= 100 &&
-            assertion.failures.every(
-              (failure) =>
-                typeof failure === 'string' && failure.length <= 20_000,
-            ),
-        ),
-    );
   const validSession =
     goal?.agentSession === null ||
     (goal?.agentSession &&
@@ -159,10 +98,6 @@ function isValidGoal(goal) {
       (goal.findingsMarkdown === null ||
         (typeof goal.findingsMarkdown === 'string' &&
           goal.findingsMarkdown.length <= 500_000)) &&
-      (goal.planMarkdown === null ||
-        (typeof goal.planMarkdown === 'string' &&
-          goal.planMarkdown.length <= 500_000)) &&
-      validAuditArtifacts &&
       validSession &&
       // Tasks are deliberately not validated here: a goal save never writes a
       // task row, so the renderer does not send them.
@@ -272,9 +207,12 @@ async function startClaudeRequest(event, request) {
     }
 
     const toolNames = new Map();
-    const artifactMutationTools = new Set([
-      'mcp__rba__add_test_trace',
-      'mcp__rba__remove_artifact',
+    const pendingFindings = new Map();
+    const taskMutationTools = new Set([
+      'mcp__rba__add_task',
+      'mcp__rba__update_task',
+      'mcp__rba__remove_task',
+      'mcp__rba__commit_tasks',
     ]);
     const stream = beginClaudeCli({
       prompt: request.prompt,
@@ -304,18 +242,28 @@ async function startClaudeRequest(event, request) {
       },
       onToolInput: (tool) => {
         const toolName = toolNames.get(tool.id);
+        if (
+          toolName === 'mcp__rba__update_findings' &&
+          typeof tool.input?.markdown === 'string' &&
+          tool.input.markdown.length <= 500_000
+        ) {
+          pendingFindings.set(tool.id, tool.input.markdown);
+        }
         sendClaudeEvent(event.sender, {
           type: 'tool-input',
           requestId: request.requestId,
           tool: {
             ...tool,
-            input: artifactMutationTools.has(toolName)
-              ? Object.fromEntries(
-                  Object.entries(tool.input ?? {}).filter(
-                    ([key]) => key !== 'content',
-                  ),
-                )
-              : relativeToolInput(tool.input, cwd),
+            input:
+              toolName === 'mcp__rba__update_findings'
+                ? {}
+                : taskMutationTools.has(toolName)
+                  ? Object.fromEntries(
+                      Object.entries(tool.input ?? {}).filter(
+                        ([key]) => key !== 'specMarkdown',
+                      ),
+                    )
+                  : relativeToolInput(tool.input, cwd),
           },
         });
       },
@@ -325,16 +273,22 @@ async function startClaudeRequest(event, request) {
           requestId: request.requestId,
           tool,
         });
-        if (
-          !tool.isError &&
-          artifactMutationTools.has(toolNames.get(tool.id))
-        ) {
+        const markdown = pendingFindings.get(tool.id);
+        if (!tool.isError && markdown !== undefined) {
           sendClaudeEvent(event.sender, {
-            type: 'audit-updated',
+            type: 'findings-updated',
             requestId: request.requestId,
-            artifacts: goalStore.get(request.goalId)?.auditArtifacts ?? [],
+            markdown,
           });
         }
+        if (!tool.isError && taskMutationTools.has(toolNames.get(tool.id))) {
+          sendClaudeEvent(event.sender, {
+            type: 'tasks-updated',
+            requestId: request.requestId,
+            tasks: goalStore.listTasks(request.goalId),
+          });
+        }
+        pendingFindings.delete(tool.id);
         toolNames.delete(tool.id);
       },
     });
@@ -524,71 +478,6 @@ ipcMain.handle('workers:diff', (event, taskId) => {
   return workerService.getDiff(taskId);
 });
 
-function validShortId(value) {
-  return typeof value === 'string' && value.length > 0 && value.length <= 200;
-}
-
-ipcMain.handle('workflows:list', async (event, taskId) => {
-  if (!isTrustedSender(event.senderFrame) || !validShortId(taskId)) {
-    throw new Error('Invalid workflow request.');
-  }
-  const task = goalStore.getTaskForWorker(taskId);
-  if (!task) throw new Error('The task no longer exists.');
-  return listWorkflows(task.workingDirectory);
-});
-
-ipcMain.handle('workflows:get', (event, taskId) => {
-  if (!isTrustedSender(event.senderFrame) || !validShortId(taskId)) {
-    throw new Error('Invalid workflow request.');
-  }
-  return workflowService.get(taskId);
-});
-
-ipcMain.handle('workflows:start', async (event, taskId, sourcePath) => {
-  if (
-    !isTrustedSender(event.senderFrame) ||
-    !validShortId(taskId) ||
-    typeof sourcePath !== 'string'
-  ) {
-    throw new Error('Invalid workflow request.');
-  }
-  const task = goalStore.getTaskForWorker(taskId);
-  if (!task) throw new Error('The task no longer exists.');
-  const workflows = await listWorkflows(task.workingDirectory);
-  if (!workflows.some((workflow) => workflow.path === sourcePath)) {
-    throw new Error('The selected workflow is outside this project.');
-  }
-  return workflowService.start(taskId, sourcePath);
-});
-
-ipcMain.handle('workflows:resolve', (event, runId, key, value) => {
-  const serialized = JSON.stringify(value);
-  if (
-    !isTrustedSender(event.senderFrame) ||
-    !validShortId(runId) ||
-    !validShortId(key) ||
-    typeof serialized !== 'string' ||
-    serialized.length > 100_000
-  ) {
-    throw new Error('Invalid workflow input.');
-  }
-  return workflowService.resolveHuman(runId, key, value);
-});
-
-ipcMain.handle('workflows:stop', (event, runId) => {
-  if (!isTrustedSender(event.senderFrame) || !validShortId(runId)) {
-    throw new Error('Invalid workflow request.');
-  }
-  return workflowService.stop(runId);
-});
-
-ipcMain.handle('workflows:diff', (event, taskId) => {
-  if (!isTrustedSender(event.senderFrame) || !validShortId(taskId)) {
-    throw new Error('Invalid workflow request.');
-  }
-  return workflowService.getDiff(taskId);
-});
-
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
@@ -620,23 +509,11 @@ app.whenReady().then(() => {
   goalDatabase = path.join(app.getPath('userData'), 'goals.sqlite3');
   goalStore = new GoalStore(goalDatabase);
   goalStore.interruptWorkingRuns();
-  workflowStore = new WorkflowStore(goalStore.database);
-  const resumableWorkflows = workflowStore.recoverInterruptedRuns();
   workerService = new WorkerService({
     store: goalStore,
     worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
     onUpdate: broadcastWorker,
   });
-  workflowService = new WorkflowService({
-    store: workflowStore,
-    taskStore: goalStore,
-    worktreesDirectory: path.join(
-      app.getPath('userData'),
-      'workflow-worktrees',
-    ),
-    onUpdate: broadcastWorkflow,
-  });
-  for (const run of resumableWorkflows) workflowService.resume(run);
   createWindow();
 
   app.on('activate', () => {
@@ -647,7 +524,6 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
-  workflowService?.shutdown();
   workerService?.shutdown();
   goalStore?.close();
 });

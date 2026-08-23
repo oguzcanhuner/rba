@@ -41,12 +41,12 @@ export function useGoalStream({
 
   useEffect(() => {
     const handleEvent = (event: ClaudeStreamEvent) => {
-      if (event.type === 'audit-updated') {
+      if (event.type === 'findings-updated') {
         setActiveGoal((current) =>
           current
             ? {
                 ...current,
-                auditArtifacts: event.artifacts,
+                findingsMarkdown: event.markdown,
                 updatedAt: new Date().toISOString(),
               }
             : current,

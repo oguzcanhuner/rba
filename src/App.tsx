@@ -15,10 +15,10 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable';
-import { WorkflowScreen } from './components/WorkflowScreen';
+import { WorkerScreen } from './components/WorkerScreen';
 import { useGoalStream } from './hooks/useGoalStream';
 import { useTasks } from './hooks/useTasks';
-import { useWorkflowRuns } from './hooks/useWorkflowRuns';
+import { useWorkerRuns } from './hooks/useWorkerRuns';
 import {
   byNewestCreation,
   goalTitle,
@@ -93,8 +93,6 @@ export function App() {
             workingDirectory: cwd,
             agentSession: null,
             findingsMarkdown: null,
-            auditArtifacts: [],
-            planMarkdown: null,
             messages: [userMessage, assistantMessage],
             createdAt: now,
             updatedAt: now,
@@ -150,16 +148,15 @@ export function App() {
 
   const {
     activeTask,
-    activeRun,
-    definitions: workflowDefinitions,
-    diff: workflowDiff,
+    activeWorker,
+    diff: workerDiff,
     startingTaskId,
-    close: closeWorkflow,
+    close: closeWorker,
     open: openTask,
-    start: startWorkflow,
-    stop: stopWorkflow,
-    resolve: resolveWorkflow,
-  } = useWorkflowRuns({ setTaskStatus: tasks.setStatus, setError });
+    start: startWorker,
+    stop: stopWorker,
+    send: sendWorkerMessage,
+  } = useWorkerRuns({ setTaskStatus: tasks.setStatus, setError });
 
   useEffect(() => {
     let disposed = false;
@@ -260,7 +257,7 @@ export function App() {
         await persistCurrentGoal();
         setWorkingDirectory(directory);
         setActiveGoal(null);
-        closeWorkflow();
+        closeWorker();
         setDraft('');
         setError(null);
       }
@@ -281,7 +278,7 @@ export function App() {
       if (goal) {
         const restored = openGoal(goal);
         setWorkingDirectory(restored.workingDirectory);
-        closeWorkflow();
+        closeWorker();
         setDraft('');
         setError(null);
       }
@@ -298,7 +295,7 @@ export function App() {
     try {
       await persistCurrentGoal();
       setActiveGoal(null);
-      closeWorkflow();
+      closeWorker();
       setDraft('');
       setError(null);
     } catch {
@@ -318,36 +315,6 @@ export function App() {
       );
     } catch {
       setError('Tasks could not be queued.');
-    }
-  }
-
-  function updatePlan(planMarkdown: string) {
-    setActiveGoal((current) =>
-      current
-        ? {
-            ...current,
-            planMarkdown,
-            updatedAt: new Date().toISOString(),
-          }
-        : current,
-    );
-  }
-
-  async function reviewPlan() {
-    if (
-      !activeGoal?.planMarkdown?.trim() ||
-      !workingDirectory ||
-      activeRequestId
-    ) {
-      return;
-    }
-
-    setError(null);
-    try {
-      await window.goals.save(activeGoal);
-      startGoalRequest('Review my plan.', workingDirectory);
-    } catch {
-      setError('The plan could not be saved for review.');
     }
   }
 
@@ -376,20 +343,19 @@ export function App() {
       )}
 
       {activeTask ? (
-        <WorkflowScreen
+        <WorkerScreen
           task={activeTask}
-          run={activeRun}
-          definitions={workflowDefinitions}
-          diff={workflowDiff}
+          run={activeWorker}
+          diff={workerDiff}
           error={error}
           isStarting={startingTaskId === activeTask.id}
           onBack={() => {
-            closeWorkflow();
+            closeWorker();
             setError(null);
           }}
-          onStart={(sourcePath) => startWorkflow(activeTask, sourcePath)}
-          onResolve={resolveWorkflow}
-          onStop={stopWorkflow}
+          onStart={() => startWorker(activeTask)}
+          onSend={sendWorkerMessage}
+          onStop={stopWorker}
         />
       ) : (
         <ResizablePanelGroup
@@ -408,8 +374,6 @@ export function App() {
               }
               onCommit={commitTasks}
               onOpenTask={openTask}
-              onPlanChange={updatePlan}
-              onReviewPlan={reviewPlan}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />

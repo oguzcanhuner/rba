@@ -15,26 +15,6 @@ function hasColumn(database, table, column) {
     .some(({ name }) => name === column);
 }
 
-function auditArtifactsFrom(json) {
-  const artifacts = JSON.parse(json);
-  if (!Array.isArray(artifacts)) {
-    return [];
-  }
-
-  return artifacts.flatMap((artifact) => {
-    if (!artifact || typeof artifact.id !== 'string') {
-      return [];
-    }
-    if (artifact.kind === 'test-trace') {
-      return [artifact];
-    }
-    if (artifact.kind === 'vitest-trace') {
-      return [{ ...artifact, kind: 'test-trace', framework: 'vitest' }];
-    }
-    return [];
-  });
-}
-
 const migrations = [
   {
     version: 1,
@@ -162,30 +142,6 @@ const migrations = [
       }
     },
   },
-  {
-    version: 6,
-    isApplied(database) {
-      return hasColumn(database, 'goals', 'plan_markdown');
-    },
-    up(database) {
-      if (!hasColumn(database, 'goals', 'plan_markdown')) {
-        database.exec('ALTER TABLE goals ADD COLUMN plan_markdown TEXT');
-      }
-    },
-  },
-  {
-    version: 7,
-    isApplied(database) {
-      return hasColumn(database, 'goals', 'audit_artifacts_json');
-    },
-    up(database) {
-      if (!hasColumn(database, 'goals', 'audit_artifacts_json')) {
-        database.exec(
-          "ALTER TABLE goals ADD COLUMN audit_artifacts_json TEXT NOT NULL DEFAULT '[]'",
-        );
-      }
-    },
-  },
 ];
 
 function migrate(database) {
@@ -237,15 +193,12 @@ class GoalStore {
 
     this.upsertGoal = this.database.prepare(`
       INSERT INTO goals (
-        id, title, working_directory, findings_markdown, plan_markdown,
-        audit_artifacts_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, title, working_directory, findings_markdown, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         working_directory = excluded.working_directory,
         findings_markdown = excluded.findings_markdown,
-        plan_markdown = excluded.plan_markdown,
-        audit_artifacts_json = excluded.audit_artifacts_json,
         updated_at = excluded.updated_at
     `);
     this.deactivateSessions = this.database.prepare(`
@@ -304,8 +257,6 @@ class GoalStore {
           title,
           working_directory AS workingDirectory,
           findings_markdown AS findingsMarkdown,
-          plan_markdown AS planMarkdown,
-          audit_artifacts_json AS auditArtifactsJson,
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM goals
@@ -352,10 +303,8 @@ class GoalStore {
         parts: JSON.parse(partsJson),
       }));
 
-    const { auditArtifactsJson, ...goalFields } = goal;
     return {
-      ...goalFields,
-      auditArtifacts: auditArtifactsFrom(auditArtifactsJson),
+      ...goal,
       agentSession,
       tasks: this.listTasks(id),
       messages,
@@ -672,9 +621,7 @@ class GoalStore {
         .prepare(`
           UPDATE tasks
           SET status = 'failed', updated_at = ?
-          WHERE id IN (
-            SELECT task_id FROM worker_runs WHERE status = 'failed'
-          )
+          WHERE status = 'working'
         `)
         .run(now);
       this.database.exec('COMMIT');
@@ -693,8 +640,6 @@ class GoalStore {
         goal.title,
         goal.workingDirectory,
         goal.findingsMarkdown,
-        goal.planMarkdown ?? null,
-        JSON.stringify(goal.auditArtifacts ?? []),
         goal.createdAt,
         goal.updatedAt,
       );
