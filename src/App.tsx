@@ -241,7 +241,9 @@ export function App() {
     startingTaskId,
     close: closeWorker,
     open: openTask,
-    start: startWorker,
+    start: startTaskInBackground,
+    startInline: startWorker,
+    complete: completeTask,
     stop: stopWorker,
     send: sendWorkerMessage,
   } = useWorkerRuns({ setTaskStatus: tasks.setStatus, setError });
@@ -431,12 +433,15 @@ export function App() {
           activeGoalId={activeGoal?.id ?? null}
           isCollapsed={isSidebarCollapsed}
           busyGoalIds={busyGoalIds}
+          startingTaskId={startingTaskId}
           onToggleCollapse={() =>
             setIsSidebarCollapsed((collapsed) => !collapsed)
           }
           onNewGoal={startNewGoal}
           onSelectGoal={selectGoal}
           onOpenTask={openTask}
+          onStartTask={startTaskInBackground}
+          onCompleteTask={completeTask}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
       )}
@@ -457,6 +462,7 @@ export function App() {
           onStart={() => startWorker(activeTask)}
           onSend={sendWorkerMessage}
           onStop={stopWorker}
+          onComplete={() => completeTask(activeTask)}
         />
       ) : (
         <ResizablePanelGroup
@@ -473,8 +479,11 @@ export function App() {
               commitDisabled={
                 activeRequestId !== null || startingTaskId !== null
               }
+              startingTaskId={startingTaskId}
               onCommit={commitTasks}
               onOpenTask={openTask}
+              onStartTask={startTaskInBackground}
+              onCompleteTask={completeTask}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />

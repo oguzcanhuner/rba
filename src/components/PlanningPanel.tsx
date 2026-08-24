@@ -10,16 +10,22 @@ type PlanningPanelProps = {
   goal: Goal | null;
   tasks: SidebarTask[];
   commitDisabled: boolean;
+  startingTaskId: string | null;
   onCommit: () => void;
   onOpenTask: (task: SidebarTask) => void;
+  onStartTask: (task: SidebarTask) => void;
+  onCompleteTask: (task: SidebarTask) => void;
 };
 
 export function PlanningPanel({
   goal,
   tasks,
   commitDisabled,
+  startingTaskId,
   onCommit,
   onOpenTask,
+  onStartTask,
+  onCompleteTask,
 }: PlanningPanelProps) {
   const artifacts = goal?.artifacts ?? [];
 
@@ -38,8 +44,11 @@ export function PlanningPanel({
             <TaskList
               tasks={tasks}
               commitDisabled={commitDisabled}
+              startingTaskId={startingTaskId}
               onCommit={onCommit}
               onOpenTask={onOpenTask}
+              onStartTask={onStartTask}
+              onCompleteTask={onCompleteTask}
               showHeading={false}
             />
           ) : (

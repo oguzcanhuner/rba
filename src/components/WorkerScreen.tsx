@@ -30,6 +30,7 @@ type WorkerScreenProps = {
   onSend: (message: string) => Promise<boolean>;
   onStart: () => void;
   onStop: () => void;
+  onComplete: () => void;
 };
 
 export function WorkerScreen({
@@ -42,6 +43,7 @@ export function WorkerScreen({
   onSend,
   onStart,
   onStop,
+  onComplete,
 }: WorkerScreenProps) {
   const workerLayout = useDefaultLayout({
     id: 'rba.worker-workspace-v4',
@@ -159,6 +161,16 @@ export function WorkerScreen({
           aria-hidden="true"
         />
         <span className="sr-only">{run.status}</span>
+        {run.status !== 'working' && task.status !== 'merged' && (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={onComplete}
+          >
+            Mark as merged
+          </Button>
+        )}
       </header>
 
       <ResizablePanelGroup

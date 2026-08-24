@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import plusIcon from '../assets/plus.svg';
 import settingsIcon from '../assets/settings.svg';
 import sidebarCollapseIcon from '../assets/sidebar-collapse.svg';
 import type { GoalSummary, SidebarTask } from '../claude';
+import { taskContextMenuItems } from '../lib/taskContextMenuItems';
 import { Button } from './ui/button';
+import { ContextMenu } from './ui/context-menu';
 
 type GoalSidebarProps = {
   goals: GoalSummary[];
@@ -11,10 +14,13 @@ type GoalSidebarProps = {
   isCollapsed: boolean;
   /** Goals with a turn currently streaming, whether or not displayed. */
   busyGoalIds: Set<string>;
+  startingTaskId: string | null;
   onToggleCollapse: () => void;
   onNewGoal: () => void;
   onSelectGoal: (id: string) => void;
   onOpenTask: (task: SidebarTask) => void;
+  onStartTask: (task: SidebarTask) => void;
+  onCompleteTask: (task: SidebarTask) => void;
   onOpenSettings: () => void;
 };
 
@@ -24,12 +30,20 @@ export function GoalSidebar({
   activeGoalId,
   isCollapsed,
   busyGoalIds,
+  startingTaskId,
   onToggleCollapse,
   onNewGoal,
   onSelectGoal,
   onOpenTask,
+  onStartTask,
+  onCompleteTask,
   onOpenSettings,
 }: GoalSidebarProps) {
+  const [contextMenu, setContextMenu] = useState<{
+    task: SidebarTask;
+    x: number;
+    y: number;
+  } | null>(null);
   return (
     <aside
       className="goal-sidebar"
@@ -130,6 +144,14 @@ export function GoalSidebar({
                     key={task.id}
                     title={task.title}
                     onClick={() => onOpenTask(task)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu({
+                        task,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
                   >
                     <span
                       className={`sidebar-task__status task__status task__status--${task.status}`}
@@ -162,6 +184,20 @@ export function GoalSidebar({
           />
         </Button>
       </div>
+      {contextMenu && (
+        <ContextMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          items={taskContextMenuItems({
+            task: contextMenu.task,
+            isStarting: startingTaskId === contextMenu.task.id,
+            onOpenTask,
+            onStartTask,
+            onCompleteTask,
+            onSelectGoal: () => onSelectGoal(contextMenu.task.goalId),
+          })}
+        />
+      )}
     </aside>
   );
 }

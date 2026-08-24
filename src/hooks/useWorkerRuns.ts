@@ -94,7 +94,28 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
     [setError],
   );
 
+  /** Starts a task in the background without switching into WorkerScreen.
+   * Status updates arrive through the worker event listener above. */
   const start = useCallback(
+    async (task: SidebarTask) => {
+      setStartingTaskId(task.id);
+      setError(null);
+      try {
+        await window.workers.start(task.id);
+      } catch {
+        setError(
+          'This task could not be started. Make sure the folder is a git repository.',
+        );
+      } finally {
+        setStartingTaskId(null);
+      }
+    },
+    [setError],
+  );
+
+  /** Starts a task from within WorkerScreen, where the user is already
+   * looking at it, so the run is shown inline as soon as it starts. */
+  const startInline = useCallback(
     async (task: SidebarTask) => {
       setStartingTaskId(task.id);
       setError(null);
@@ -109,6 +130,22 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
         );
       } finally {
         setStartingTaskId(null);
+      }
+    },
+    [setTaskStatus, setError],
+  );
+
+  const complete = useCallback(
+    async (task: SidebarTask) => {
+      setError(null);
+      try {
+        await window.workers.complete(task.id);
+        setTaskStatus(task.id, 'merged');
+        setActiveTask((current) =>
+          current?.id === task.id ? { ...current, status: 'merged' } : current,
+        );
+      } catch {
+        setError('This task could not be marked as merged.');
       }
     },
     [setTaskStatus, setError],
@@ -154,6 +191,8 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
     close,
     open,
     start,
+    startInline,
+    complete,
     stop,
     send,
   };

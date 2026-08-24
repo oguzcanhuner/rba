@@ -663,6 +663,23 @@ class GoalStore {
     return this.getWorkerRun(taskId);
   }
 
+  /** Marks a task as fully closed once its branch has been merged, without
+   * touching the underlying worker run. Allowed once the agent's run has
+   * left the working state, since a partial diff might still get manually
+   * merged or cherry-picked. */
+  completeTask(taskId) {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare(`
+        UPDATE tasks SET status = 'merged', updated_at = ?
+        WHERE id = ? AND status IN ('completed', 'stopped', 'failed')
+      `)
+      .run(now, taskId);
+    if (result.changes === 0) {
+      throw new Error('This task cannot be marked as merged.');
+    }
+  }
+
   getWorkerRun(taskId) {
     const run = this.database
       .prepare(`

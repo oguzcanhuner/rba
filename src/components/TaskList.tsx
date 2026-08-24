@@ -1,23 +1,37 @@
+import { useState } from 'react';
 import type { Task } from '../claude';
+import { taskContextMenuItems } from '../lib/taskContextMenuItems';
 import { MarkdownContent } from './MarkdownContent';
 import { Button } from './ui/button';
+import { ContextMenu } from './ui/context-menu';
 
 type TaskListProps<T extends Task> = {
   tasks: T[];
   commitDisabled: boolean;
+  startingTaskId?: string | null;
   onCommit: () => void;
   onOpenTask: (task: T) => void;
+  onStartTask?: (task: T) => void;
+  onCompleteTask?: (task: T) => void;
   showHeading?: boolean;
 };
 
 export function TaskList<T extends Task>({
   tasks,
   commitDisabled,
+  startingTaskId = null,
   onCommit,
   onOpenTask,
+  onStartTask,
+  onCompleteTask,
   showHeading = true,
 }: TaskListProps<T>) {
   const draftCount = tasks.filter((task) => task.status === 'draft').length;
+  const [contextMenu, setContextMenu] = useState<{
+    task: T;
+    x: number;
+    y: number;
+  } | null>(null);
 
   return (
     <section
@@ -51,7 +65,17 @@ export function TaskList<T extends Task>({
       ) : (
         <div className="tasks__list">
           {tasks.map((task) => (
-            <details className="task" key={task.id}>
+            <details
+              className="task"
+              key={task.id}
+              onContextMenu={(event) => {
+                if (task.status === 'draft') {
+                  return;
+                }
+                event.preventDefault();
+                setContextMenu({ task, x: event.clientX, y: event.clientY });
+              }}
+            >
               <summary className="task__summary">
                 <span
                   className={`task__status task__status--${task.status}`}
@@ -95,6 +119,19 @@ export function TaskList<T extends Task>({
             </details>
           ))}
         </div>
+      )}
+      {contextMenu && (
+        <ContextMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          items={taskContextMenuItems({
+            task: contextMenu.task,
+            isStarting: startingTaskId === contextMenu.task.id,
+            onOpenTask,
+            onStartTask,
+            onCompleteTask,
+          })}
+        />
       )}
     </section>
   );

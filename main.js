@@ -526,6 +526,18 @@ ipcMain.handle('workers:send', (event, taskId, prompt) => {
   return workerService.send(taskId, prompt.trim());
 });
 
+ipcMain.handle('workers:complete', (event, taskId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100
+  ) {
+    throw new Error('Invalid worker request.');
+  }
+  goalStore.completeTask(taskId);
+});
+
 ipcMain.handle('workers:diff', (event, taskId) => {
   if (
     !isTrustedSender(event.senderFrame) ||

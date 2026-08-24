@@ -341,6 +341,41 @@ test('persists a worker run and its conversation', () => {
   store.close();
 });
 
+test('marks a task as merged without touching its worker run', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-1',
+      'goal-1',
+      1,
+      'Implement workers',
+      'Build the worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.updateWorkerRun('task-1', { status: 'completed' });
+
+  store.completeTask('task-1');
+
+  assert.equal(store.get('goal-1').tasks[0].status, 'merged');
+  assert.equal(store.getWorkerRun('task-1').status, 'completed');
+  assert.throws(() => store.completeTask('task-1'), /merged/);
+  store.close();
+});
+
 test('marks unfinished workers and tool activity as failed on restart', () => {
   const store = new GoalStore(':memory:');
   store.save(goal());

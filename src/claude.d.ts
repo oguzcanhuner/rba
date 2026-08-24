@@ -97,7 +97,8 @@ export type TaskStatus =
   | 'working'
   | 'completed'
   | 'stopped'
-  | 'failed';
+  | 'failed'
+  | 'merged';
 
 export type Task = {
   id: string;
@@ -128,7 +129,7 @@ export type WorkerRun = {
   taskId: string;
   goalId: string;
   title: string;
-  status: Exclude<TaskStatus, 'draft' | 'queued'>;
+  status: Exclude<TaskStatus, 'draft' | 'queued' | 'merged'>;
   branch: string;
   worktree: string;
   baseRevision: string | null;
@@ -178,6 +179,7 @@ declare global {
       stop(taskId: string): Promise<WorkerRun>;
       send(taskId: string, prompt: string): Promise<WorkerRun>;
       diff(taskId: string): Promise<WorkerDiff>;
+      complete(taskId: string): Promise<void>;
       onEvent(callback: (event: WorkerEvent) => void): () => void;
     };
   }
