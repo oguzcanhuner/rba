@@ -266,6 +266,14 @@
   animation: goal-list__busy-pulse 1.2s ease-in-out infinite;
 }
 
+.goal-list__unread-indicator {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sidebar-primary);
+}
+
 @keyframes goal-list__busy-pulse {
   0%,
   100% {

@@ -179,6 +179,19 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 10,
+    isApplied(database) {
+      return hasColumn(database, 'goals', 'unread');
+    },
+    up(database) {
+      if (!hasColumn(database, 'goals', 'unread')) {
+        database.exec(
+          'ALTER TABLE goals ADD COLUMN unread INTEGER NOT NULL DEFAULT 0',
+        );
+      }
+    },
+  },
 ];
 
 function migrate(database) {
@@ -271,6 +284,12 @@ class GoalStore {
       INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `);
+    this.markGoalUnread = this.database.prepare(`
+      UPDATE goals SET unread = 1 WHERE id = ?
+    `);
+    this.markGoalRead = this.database.prepare(`
+      UPDATE goals SET unread = 0 WHERE id = ?
+    `);
   }
 
   getSettings() {
@@ -309,12 +328,13 @@ class GoalStore {
           title,
           working_directory AS workingDirectory,
           created_at AS createdAt,
-          updated_at AS updatedAt
+          updated_at AS updatedAt,
+          unread
         FROM goals
         ORDER BY created_at DESC
       `)
       .all()
-      .map((row) => ({ ...row }));
+      .map((row) => ({ ...row, unread: Boolean(row.unread) }));
   }
 
   get(id) {
@@ -325,7 +345,8 @@ class GoalStore {
           title,
           working_directory AS workingDirectory,
           created_at AS createdAt,
-          updated_at AS updatedAt
+          updated_at AS updatedAt,
+          unread
         FROM goals
         WHERE id = ?
       `)
@@ -334,6 +355,7 @@ class GoalStore {
     if (!goal) {
       return null;
     }
+    goal.unread = Boolean(goal.unread);
 
     const sessionRow = this.database
       .prepare(`
@@ -769,6 +791,14 @@ class GoalStore {
       this.database.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  markUnread(goalId) {
+    this.markGoalUnread.run(goalId);
+  }
+
+  markRead(goalId) {
+    this.markGoalRead.run(goalId);
   }
 
   close() {

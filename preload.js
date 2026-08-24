@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('goals', {
   list: () => ipcRenderer.invoke('goals:list'),
   get: (id) => ipcRenderer.invoke('goals:get', id),
   save: (goal) => ipcRenderer.invoke('goals:save', goal),
+  markRead: (id) => ipcRenderer.invoke('goals:mark-read', id),
+  markUnread: (id) => ipcRenderer.invoke('goals:mark-unread', id),
   commitTasks: (goalId) => ipcRenderer.invoke('goals:commit-tasks', goalId),
 });
 

@@ -428,6 +428,32 @@ ipcMain.handle('goals:save', (event, goal) => {
   goalStore.save(goal);
 });
 
+ipcMain.handle('goals:mark-read', (event, goalId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100
+  ) {
+    throw new Error('Invalid goal request.');
+  }
+
+  goalStore.markRead(goalId);
+});
+
+ipcMain.handle('goals:mark-unread', (event, goalId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100
+  ) {
+    throw new Error('Invalid goal request.');
+  }
+
+  goalStore.markUnread(goalId);
+});
+
 ipcMain.handle('goals:commit-tasks', (event, goalId) => {
   if (
     !isTrustedSender(event.senderFrame) ||

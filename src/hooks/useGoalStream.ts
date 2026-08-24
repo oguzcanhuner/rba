@@ -3,6 +3,7 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 import type { ClaudeStreamEvent, Goal, Task } from '../claude';
@@ -50,6 +51,8 @@ export function useGoalStream({
   const activeRequestId = activeGoalId
     ? (busyRequests.get(activeGoalId) ?? null)
     : null;
+  const activeGoalIdRef = useRef(activeGoalId);
+  activeGoalIdRef.current = activeGoalId;
 
   useEffect(() => {
     const handleEvent = (event: ClaudeStreamEvent) => {
@@ -201,6 +204,13 @@ export function useGoalStream({
       }
 
       clearBusy(goalId, event.requestId);
+      if (updated && goalId !== activeGoalIdRef.current) {
+        updated = updateGoal(goalId, (current) => ({
+          ...current,
+          unread: true,
+        }));
+        window.goals.markUnread(goalId).catch(() => {});
+      }
       if (updated) {
         // Persist on completion regardless of whether this goal is currently
         // displayed, so a finished background turn is never lost.

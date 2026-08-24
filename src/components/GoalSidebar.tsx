@@ -92,13 +92,22 @@ export function GoalSidebar({
                   onClick={() => onSelectGoal(goal.id)}
                 >
                   <span className="goal-list__title">{goal.title}</span>
-                  {busyGoalIds.has(goal.id) && (
+                  {busyGoalIds.has(goal.id) ? (
                     <span
                       className="goal-list__busy-indicator"
                       role="status"
                       aria-label="Working"
                       title="Working"
                     />
+                  ) : (
+                    goal.unread && (
+                      <span
+                        className="goal-list__unread-indicator"
+                        role="status"
+                        aria-label="Unread"
+                        title="Unread"
+                      />
+                    )
                   )}
                 </Button>
               ))

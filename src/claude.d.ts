@@ -80,6 +80,7 @@ export type GoalSummary = {
   workingDirectory: string;
   createdAt: string;
   updatedAt: string;
+  unread: boolean;
 };
 
 export type Artifact = {
@@ -160,6 +161,8 @@ declare global {
       list(): Promise<GoalSummary[]>;
       get(id: string): Promise<GoalWithTasks | null>;
       save(goal: Goal): Promise<void>;
+      markRead(id: string): Promise<void>;
+      markUnread(id: string): Promise<void>;
       commitTasks(goalId: string): Promise<Task[]>;
     };
     tasks: {

@@ -54,6 +54,7 @@ test('persists and lists goals', () => {
       workingDirectory: newer.workingDirectory,
       createdAt: newer.createdAt,
       updatedAt: newer.updatedAt,
+      unread: false,
     },
     {
       id: saved.id,
@@ -61,9 +62,40 @@ test('persists and lists goals', () => {
       workingDirectory: saved.workingDirectory,
       createdAt: saved.createdAt,
       updatedAt: continued.updatedAt,
+      unread: false,
     },
   ]);
-  assert.deepEqual(store.get(saved.id), continued);
+  assert.deepEqual(store.get(saved.id), { ...continued, unread: false });
+  store.close();
+});
+
+test('marks a goal unread and read', () => {
+  const store = new GoalStore(':memory:');
+  const saved = goal();
+  store.save(saved);
+
+  assert.equal(store.get(saved.id).unread, false);
+
+  store.markUnread(saved.id);
+  assert.equal(store.get(saved.id).unread, true);
+  assert.equal(store.list().find((item) => item.id === saved.id).unread, true);
+
+  store.markRead(saved.id);
+  assert.equal(store.get(saved.id).unread, false);
+  assert.equal(store.list().find((item) => item.id === saved.id).unread, false);
+
+  store.close();
+});
+
+test('save does not reset the unread flag', () => {
+  const store = new GoalStore(':memory:');
+  const saved = goal();
+  store.save(saved);
+  store.markUnread(saved.id);
+
+  store.save({ ...saved, updatedAt: '2026-08-09T13:00:00.000Z' });
+
+  assert.equal(store.get(saved.id).unread, true);
   store.close();
 });
 
@@ -95,7 +127,7 @@ test('stores provider-neutral agent sessions and message updates', () => {
   store.save(initial);
   store.save(updated);
 
-  assert.deepEqual(store.get(initial.id), updated);
+  assert.deepEqual(store.get(initial.id), { ...updated, unread: false });
 
   const codexSession = {
     ...agentSession,
@@ -107,7 +139,10 @@ test('stores provider-neutral agent sessions and message updates', () => {
   const switchedProvider = { ...updated, agentSession: codexSession };
   store.save(switchedProvider);
 
-  assert.deepEqual(store.get(initial.id), switchedProvider);
+  assert.deepEqual(store.get(initial.id), {
+    ...switchedProvider,
+    unread: false,
+  });
   store.close();
 });
 
@@ -203,7 +238,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9],
+    [1, 2, 3, 4, 5, 8, 9, 10],
   );
   store.close();
 });
@@ -247,7 +282,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9],
+    [1, 2, 3, 4, 5, 8, 9, 10],
   );
   store.close();
 });

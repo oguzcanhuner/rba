@@ -183,6 +183,7 @@ export function App() {
             messages: [userMessage, assistantMessage],
             createdAt: now,
             updatedAt: now,
+            unread: false,
           };
 
       putGoal(goal);
@@ -341,6 +342,15 @@ export function App() {
     }
   }
 
+  function markGoalRead(id: string) {
+    window.goals.markRead(id).catch(() => {});
+    setGoals((current) =>
+      current.map((item) =>
+        item.id === id ? { ...item, unread: false } : item,
+      ),
+    );
+  }
+
   async function selectGoal(id: string) {
     if (id === activeGoalId) {
       return;
@@ -358,6 +368,7 @@ export function App() {
       closeWorker();
       setDraft('');
       setError(null);
+      markGoalRead(id);
       return;
     }
 
@@ -370,6 +381,7 @@ export function App() {
         closeWorker();
         setDraft('');
         setError(null);
+        markGoalRead(id);
       }
     } catch {
       setError('This goal could not be loaded.');
