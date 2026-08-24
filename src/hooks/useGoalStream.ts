@@ -12,6 +12,7 @@ import {
   goalIdForRequest,
   updateAssistant,
 } from '../lib/goalState';
+import { playCompletionChime } from '../lib/sound';
 
 export type QueuedMessage = { id: string; text: string };
 
@@ -148,6 +149,7 @@ export function useGoalStream({
       let updated: Goal | null = null;
 
       if (event.type === 'complete') {
+        playCompletionChime();
         updated = updateGoal(goalId, (current) => {
           const now = new Date().toISOString();
           const withAssistant = updateAssistant(
