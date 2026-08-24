@@ -122,7 +122,8 @@ class WorkerService {
       messagePosition: 0,
     };
     this.running.set(taskId, runtime);
-    this.launch(runtime, workerTaskPrompt(task), worktree);
+    const model = this.store.getSettings().workerModel;
+    this.launch(runtime, workerTaskPrompt(task), worktree, undefined, model);
 
     return this.store.getWorkerRun(taskId);
   }
@@ -166,16 +167,18 @@ class WorkerService {
     };
     this.running.set(taskId, runtime);
     this.broadcast(taskId);
-    this.launch(runtime, prompt, run.worktree, run.sessionId);
+    const model = this.store.getSettings().workerModel;
+    this.launch(runtime, prompt, run.worktree, run.sessionId, model);
     return this.store.getWorkerRun(taskId);
   }
 
-  launch(runtime, prompt, worktree, sessionId) {
+  launch(runtime, prompt, worktree, sessionId, model) {
     try {
       runtime.stream = this.beginWorker({
         prompt,
         sessionId,
         cwd: worktree,
+        model,
         onText: (text) => {
           runtime.message = {
             ...runtime.message,

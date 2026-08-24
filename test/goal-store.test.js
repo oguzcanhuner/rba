@@ -203,7 +203,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8],
+    [1, 2, 3, 4, 5, 8, 9],
   );
   store.close();
 });
@@ -247,7 +247,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8],
+    [1, 2, 3, 4, 5, 8, 9],
   );
   store.close();
 });
@@ -353,5 +353,33 @@ test('marks unfinished workers and tool activity as failed on restart', () => {
   assert.match(run.error, /stopped before/);
   assert.equal(run.messages[0].status, 'error');
   assert.equal(run.messages[0].parts[0].tool.status, 'error');
+  store.close();
+});
+
+test('settings default to sonnet when unset', () => {
+  const store = new GoalStore(':memory:');
+
+  assert.deepEqual(store.getSettings(), {
+    plannerModel: 'sonnet',
+    workerModel: 'sonnet',
+  });
+  store.close();
+});
+
+test('settings persist updates independently', () => {
+  const store = new GoalStore(':memory:');
+
+  store.updateSettings({ plannerModel: 'opus' });
+  assert.deepEqual(store.getSettings(), {
+    plannerModel: 'opus',
+    workerModel: 'sonnet',
+  });
+
+  store.updateSettings({ workerModel: 'haiku' });
+  assert.deepEqual(store.getSettings(), {
+    plannerModel: 'opus',
+    workerModel: 'haiku',
+  });
+
   store.close();
 });

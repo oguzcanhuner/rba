@@ -17,6 +17,7 @@ import type {
 import { ChatPanel } from './components/ChatPanel';
 import { GoalSidebar } from './components/GoalSidebar';
 import { PlanningPanel } from './components/PlanningPanel';
+import { SettingsScreen } from './components/SettingsScreen';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -52,6 +53,7 @@ export function App() {
     new Map(),
   );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -405,12 +407,12 @@ export function App() {
   return (
     <main
       className={
-        activeTask
+        activeTask || isSettingsOpen
           ? 'worker-shell'
           : `app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`
       }
     >
-      {!activeTask && (
+      {!activeTask && !isSettingsOpen && (
         <GoalSidebar
           goals={goals}
           tasks={tasks.committed}
@@ -423,10 +425,13 @@ export function App() {
           onNewGoal={startNewGoal}
           onSelectGoal={selectGoal}
           onOpenTask={openTask}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
       )}
 
-      {activeTask ? (
+      {isSettingsOpen ? (
+        <SettingsScreen onBack={() => setIsSettingsOpen(false)} />
+      ) : activeTask ? (
         <WorkerScreen
           task={activeTask}
           run={activeWorker}

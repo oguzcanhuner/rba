@@ -25,6 +25,11 @@ contextBridge.exposeInMainWorld('tasks', {
   list: () => ipcRenderer.invoke('tasks:list'),
 });
 
+contextBridge.exposeInMainWorld('settings', {
+  get: () => ipcRenderer.invoke('settings:get'),
+  set: (partial) => ipcRenderer.invoke('settings:set', partial),
+});
+
 contextBridge.exposeInMainWorld('workers', {
   get: (taskId) => ipcRenderer.invoke('workers:get', taskId),
   start: (taskId) => ipcRenderer.invoke('workers:start', taskId),
