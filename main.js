@@ -526,7 +526,7 @@ ipcMain.handle('workers:send', (event, taskId, prompt) => {
   return workerService.send(taskId, prompt.trim());
 });
 
-ipcMain.handle('workers:complete', (event, taskId) => {
+ipcMain.handle('workers:complete', async (event, taskId) => {
   if (
     !isTrustedSender(event.senderFrame) ||
     typeof taskId !== 'string' ||
@@ -535,7 +535,7 @@ ipcMain.handle('workers:complete', (event, taskId) => {
   ) {
     throw new Error('Invalid worker request.');
   }
-  goalStore.completeTask(taskId);
+  await workerService.completeTask(taskId);
 });
 
 ipcMain.handle('workers:diff', (event, taskId) => {

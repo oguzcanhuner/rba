@@ -254,6 +254,40 @@ class WorkerService {
     }
   }
 
+  async completeTask(taskId) {
+    const task = this.store.getTaskForWorker(taskId);
+    const run = this.store.getWorkerRun(taskId);
+    this.store.completeTask(taskId);
+
+    if (task && run?.worktree) {
+      try {
+        const { stdout: rootOutput } = await this.runCommand(
+          'git',
+          ['-C', task.workingDirectory, 'rev-parse', '--show-toplevel'],
+          { encoding: 'utf8' },
+        );
+        await this.removeWorktree(rootOutput.trim(), run.worktree);
+      } catch (error) {
+        console.error(
+          `Failed to determine the repository root for task ${taskId}.`,
+          error,
+        );
+      }
+    }
+  }
+
+  async removeWorktree(repositoryRoot, worktree) {
+    try {
+      await this.runCommand(
+        'git',
+        ['-C', repositoryRoot, 'worktree', 'remove', worktree, '--force'],
+        { encoding: 'utf8' },
+      );
+    } catch (error) {
+      console.error(`Failed to remove worktree ${worktree}.`, error);
+    }
+  }
+
   async getDiff(taskId) {
     const run = this.store.getWorkerRun(taskId);
     if (!run) {

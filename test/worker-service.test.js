@@ -220,3 +220,76 @@ test('returns tracked and untracked worker changes from the base revision', asyn
   await waitForImmediate();
   store.close();
 });
+
+test('completes a task by marking it merged and removing its worktree', async () => {
+  const store = storeWithQueuedTask();
+  const commands = [];
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (command, args) => {
+      commands.push({ command, args });
+      if (args.includes('remove')) {
+        return { stdout: '' };
+      }
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise(() => {}),
+    }),
+  });
+
+  await service.start('task-1');
+  service.stop('task-1');
+  await waitForImmediate();
+
+  await service.completeTask('task-1');
+
+  const task = store.getTaskForWorker('task-1');
+  assert.equal(task.status, 'merged');
+  assert.deepEqual(commands.at(-1), {
+    command: 'git',
+    args: [
+      '-C',
+      '/repo',
+      'worktree',
+      'remove',
+      '/worker-root/task-1',
+      '--force',
+    ],
+  });
+  store.close();
+});
+
+test('ignores worktree removal failures when completing a task', async () => {
+  const store = storeWithQueuedTask();
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (_command, args) => {
+      if (args.includes('remove')) {
+        throw new Error('worktree has uncommitted changes');
+      }
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise(() => {}),
+    }),
+  });
+
+  await service.start('task-1');
+  service.stop('task-1');
+  await waitForImmediate();
+
+  await assert.doesNotReject(() => service.completeTask('task-1'));
+  assert.equal(store.getTaskForWorker('task-1').status, 'merged');
+  store.close();
+});
