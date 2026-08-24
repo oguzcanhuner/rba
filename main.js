@@ -256,6 +256,7 @@ async function startClaudeRequest(event, request) {
       cwd,
       goalDatabase,
       goalId: request.goalId,
+      model: goalStore?.getSettings().plannerModel ?? 'sonnet',
       findingsServer: {
         command: process.execPath,
         script: path.join(__dirname, 'findings-mcp-server.js'),
@@ -509,6 +510,35 @@ ipcMain.handle('workers:diff', (event, taskId) => {
     throw new Error('Invalid worker diff request.');
   }
   return workerService.getDiff(taskId);
+});
+
+const AVAILABLE_MODEL_IDS = new Set(['fable', 'opus', 'sonnet', 'haiku']);
+
+function isValidSettingsPatch(patch) {
+  return Boolean(
+    patch &&
+      typeof patch === 'object' &&
+      (patch.plannerModel === undefined ||
+        AVAILABLE_MODEL_IDS.has(patch.plannerModel)) &&
+      (patch.workerModel === undefined ||
+        AVAILABLE_MODEL_IDS.has(patch.workerModel)),
+  );
+}
+
+ipcMain.handle('settings:get', (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted settings request.');
+  }
+
+  return goalStore.getSettings();
+});
+
+ipcMain.handle('settings:set', (event, patch) => {
+  if (!isTrustedSender(event.senderFrame) || !isValidSettingsPatch(patch)) {
+    throw new Error('Invalid settings update.');
+  }
+
+  return goalStore.updateSettings(patch);
 });
 
 function createWindow() {

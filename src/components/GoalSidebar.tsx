@@ -1,4 +1,5 @@
 import plusIcon from '../assets/plus.svg';
+import settingsIcon from '../assets/settings.svg';
 import sidebarCollapseIcon from '../assets/sidebar-collapse.svg';
 import type { GoalSummary, SidebarTask } from '../claude';
 import { Button } from './ui/button';
@@ -14,6 +15,7 @@ type GoalSidebarProps = {
   onNewGoal: () => void;
   onSelectGoal: (id: string) => void;
   onOpenTask: (task: SidebarTask) => void;
+  onOpenSettings: () => void;
 };
 
 export function GoalSidebar({
@@ -26,6 +28,7 @@ export function GoalSidebar({
   onNewGoal,
   onSelectGoal,
   onOpenTask,
+  onOpenSettings,
 }: GoalSidebarProps) {
   return (
     <aside
@@ -133,6 +136,23 @@ export function GoalSidebar({
           </section>
         </div>
       )}
+      <div className="goal-sidebar__footer">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Settings"
+          title="Settings"
+          onClick={onOpenSettings}
+        >
+          <img
+            className="goal-sidebar__settings-icon"
+            src={settingsIcon}
+            alt=""
+            aria-hidden="true"
+          />
+        </Button>
+      </div>
     </aside>
   );
 }

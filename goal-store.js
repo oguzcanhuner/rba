@@ -165,6 +165,20 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 9,
+    isApplied(database) {
+      return hasTable(database, 'settings');
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 function migrate(database) {
@@ -253,6 +267,38 @@ class GoalStore {
       DELETE FROM messages
       WHERE goal_id = ? AND position >= ?
     `);
+    this.upsertSetting = this.database.prepare(`
+      INSERT INTO settings (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `);
+  }
+
+  getSettings() {
+    const rows = this.database.prepare('SELECT key, value FROM settings').all();
+    const settings = Object.fromEntries(
+      rows.map(({ key, value }) => [key, value]),
+    );
+    return {
+      plannerModel: settings.plannerModel ?? 'sonnet',
+      workerModel: settings.workerModel ?? 'sonnet',
+    };
+  }
+
+  updateSettings(partial) {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      if (partial.plannerModel !== undefined) {
+        this.upsertSetting.run('plannerModel', partial.plannerModel);
+      }
+      if (partial.workerModel !== undefined) {
+        this.upsertSetting.run('workerModel', partial.workerModel);
+      }
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+    return this.getSettings();
   }
 
   list() {

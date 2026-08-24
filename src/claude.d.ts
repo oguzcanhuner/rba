@@ -140,6 +140,11 @@ export type WorkerRun = {
 
 export type WorkerDiff = { patch: string };
 
+export type Settings = {
+  plannerModel: string;
+  workerModel: string;
+};
+
 export type WorkerEvent = { type: 'worker-updated'; run: WorkerRun };
 
 declare global {
@@ -159,6 +164,10 @@ declare global {
     };
     tasks: {
       list(): Promise<SidebarTask[]>;
+    };
+    settings: {
+      get(): Promise<Settings>;
+      set(partial: Partial<Settings>): Promise<Settings>;
     };
     workers: {
       get(taskId: string): Promise<WorkerRun | null>;

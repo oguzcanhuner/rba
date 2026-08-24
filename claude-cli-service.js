@@ -32,6 +32,7 @@ function beginClaudeProcess({
   tools,
   allowedTools,
   extraArgs = [],
+  model = 'sonnet',
   onText,
   onToolStart = () => {},
   onToolInput = () => {},
@@ -56,7 +57,7 @@ function beginClaudeProcess({
     '--permission-mode',
     'dontAsk',
     '--model',
-    'sonnet',
+    model,
   ];
 
   if (sessionId) {
