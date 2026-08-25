@@ -834,6 +834,21 @@
   background: var(--muted-foreground);
 }
 
+.task__status-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  stroke-width: 2.5;
+}
+
+.task__status-icon--completed {
+  color: var(--status-success);
+}
+
+.task__status-icon--merged {
+  color: var(--muted-foreground);
+}
+
 .context-menu {
   position: fixed;
   z-index: 50;
@@ -990,6 +1005,21 @@
 .worker-status--stopped,
 .worker-status--failed {
   background: var(--status-danger);
+}
+
+.worker-status-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  stroke-width: 2.5;
+}
+
+.worker-status-icon--completed {
+  color: var(--status-success);
+}
+
+.worker-status-icon--merged {
+  color: var(--muted-foreground);
 }
 
 .worker-workspace {

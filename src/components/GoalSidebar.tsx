@@ -6,6 +6,7 @@ import type { GoalSummary, SidebarTask } from '../claude';
 import { goalContextMenuItems } from '../lib/goalContextMenuItems';
 import { formatRelativeTime } from '../lib/relativeTime';
 import { taskContextMenuItems } from '../lib/taskContextMenuItems';
+import { TaskStatusIndicator } from './TaskStatusIndicator';
 import { Button } from './ui/button';
 import { ContextMenu } from './ui/context-menu';
 
@@ -253,9 +254,9 @@ export function GoalSidebar({
                       });
                     }}
                   >
-                    <span
-                      className={`sidebar-task__status task__status task__status--${task.status}`}
-                      aria-hidden="true"
+                    <TaskStatusIndicator
+                      status={task.status}
+                      className="sidebar-task__status"
                     />
                     <span className="sr-only">{task.status}</span>
                     <span className="sidebar-task__title">{task.title}</span>

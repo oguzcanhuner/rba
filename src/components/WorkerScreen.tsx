@@ -5,6 +5,7 @@ import type { QueuedMessage } from '../hooks/useGoalStream';
 import { workerToolLabel } from '../lib/toolLabels';
 import { Chat } from './Chat';
 import { MarkdownContent } from './MarkdownContent';
+import { TaskStatusIndicator } from './TaskStatusIndicator';
 import { Button } from './ui/button';
 import {
   ResizableHandle,
@@ -120,10 +121,7 @@ export function WorkerScreen({
           ← Back
         </Button>
         <h1>{task.title}</h1>
-        <span
-          className={`worker-status worker-status--${run.status}`}
-          aria-hidden="true"
-        />
+        <TaskStatusIndicator status={run.status} baseClass="worker-status" />
         <span className="sr-only">{run.status}</span>
         {run.status !== 'working' && task.status !== 'merged' && (
           <Button
