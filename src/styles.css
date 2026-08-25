@@ -87,6 +87,38 @@
   --font-sans:
     "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
+
+  /* sizes — six steps, no 16px */
+  --text-micro: 0.6875rem; /* 11 */
+  --text-label: 0.75rem; /* 12 */
+  --text-ui: 0.8125rem; /* 13 */
+  --text-body: 0.875rem; /* 14 */
+  --text-lead: 0.9375rem; /* 15 — findings, chat, composer, screen titles */
+  --text-title: 1.25rem; /* 20 */
+  --text-display: 1.5rem; /* 24 */
+  --icon-glyph: 1rem; /* chevrons and ::after markers, NOT type */
+
+  /* Tailwind default names remapped onto the app scale */
+  --text-xs: var(--text-micro);
+  --text-sm: var(--text-ui);
+  --text-base: var(--text-lead);
+
+  /* weights */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* tracking */
+  --tracking-tight: -0.02em;
+  --tracking-heading: 0.02em;
+  --tracking-eyebrow: 0.05em;
+
+  /* leading */
+  --leading-tight: 1.4;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.625;
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -185,8 +217,8 @@
   gap: 8px;
   padding: 14px 12px;
   font-family: var(--font-heading);
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-semibold);
 }
 
 .goal-sidebar__actions {
@@ -234,8 +266,8 @@
   padding: 8px;
   overflow: hidden;
   color: var(--sidebar-foreground);
-  font-size: 0.8125rem;
-  font-weight: 400;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-normal);
   line-height: 1.35;
   text-align: left;
 }
@@ -273,8 +305,8 @@
   border-radius: 999px;
   background: var(--sidebar-accent);
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  font-weight: 500;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-medium);
   line-height: 1.4;
 }
 
@@ -309,13 +341,13 @@
   border-left: 2px solid var(--sidebar-primary);
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .goal-list__empty {
   margin: 8px;
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .sidebar-tasks {
@@ -327,9 +359,9 @@
   margin: 0 8px 8px;
   color: var(--muted-foreground);
   font-family: var(--font-heading);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
 }
 
@@ -358,8 +390,8 @@
 
 .sidebar-task__title {
   color: var(--sidebar-foreground);
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-medium);
 }
 
 .sidebar-task__status {
@@ -371,8 +403,8 @@
 .sidebar-task__meta {
   margin-top: 0;
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  font-weight: 400;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-normal);
 }
 
 .sidebar-task-list .sidebar-task[aria-current="page"] {
@@ -410,8 +442,8 @@
   }
 
   .chat .message__content {
-    font-size: 0.875rem;
-    line-height: 1.55;
+    font-size: var(--text-body);
+    line-height: var(--leading-normal);
   }
 
   .chat .message__part + .message__part {
@@ -459,9 +491,9 @@
 
 .findings__header h2 {
   margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--muted-foreground);
 }
@@ -495,7 +527,7 @@
 .typeset-findings {
   /* Smaller, denser rhythm: shorter leading and tighter inter-block gaps than
      the default typeset so the document reads compactly. */
-  --typeset-size: 0.9375rem;
+  --typeset-size: var(--text-lead);
   --typeset-leading: 1.55;
   --typeset-flow: 0.55em;
   font-size: var(--typeset-size);
@@ -536,7 +568,7 @@
   border: 1px solid var(--accent);
   padding: 0.35em 0.6em;
   background: var(--card);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   white-space: normal;
 }
 
@@ -586,16 +618,16 @@
   margin: 0 0 8px;
   color: var(--foreground);
   font-family: var(--font-heading);
-  font-size: 1.25rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-size: var(--text-title);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
 }
 
 .findings-empty__copy p {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
 }
 
 .tasks {
@@ -620,9 +652,9 @@
 
 .tasks__title h3 {
   margin: 0;
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: var(--text-body);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
 }
 
@@ -632,15 +664,15 @@
   border-radius: 999px;
   background: var(--secondary);
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: var(--text-micro);
   text-align: center;
 }
 
 .tasks__empty {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  font-size: var(--text-ui);
+  line-height: var(--leading-normal);
 }
 
 .tasks__list {
@@ -680,9 +712,9 @@
   background: var(--muted);
   color: var(--foreground);
   font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-eyebrow);
   text-align: left;
   text-transform: uppercase;
   cursor: pointer;
@@ -690,7 +722,7 @@
 
 .planning-section__chevron {
   justify-self: end;
-  font-size: 1rem;
+  font-size: var(--icon-glyph);
   line-height: 1;
   transition: transform 120ms ease;
 }
@@ -705,8 +737,8 @@
   border-radius: 999px;
   background: var(--secondary);
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  font-weight: 500;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-medium);
   text-align: center;
 }
 
@@ -717,8 +749,8 @@
 .planning-section__empty {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  font-size: var(--text-ui);
+  line-height: var(--leading-normal);
 }
 
 .planning-section__artifact-title {
@@ -729,9 +761,9 @@
 
 .planning-section__kind {
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-heading);
   text-transform: none;
 }
 
@@ -787,7 +819,7 @@
   grid-column: 3;
   color: var(--muted-foreground);
   content: "\203A";
-  font-size: 1rem;
+  font-size: var(--icon-glyph);
   transform: rotate(90deg);
   transition: transform 120ms ease;
 }
@@ -916,8 +948,8 @@
 
 .task__title {
   overflow: hidden;
-  font-size: 0.8125rem;
-  font-weight: 550;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -931,13 +963,13 @@
 .task__spec > p {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: var(--text-ui);
 }
 
 .typeset-task {
-  --typeset-size: 0.875rem;
+  --typeset-size: var(--text-ui);
   --typeset-leading: 1.55;
-  --typeset-flow: 0.85em;
+  --typeset-flow: 0.55em;
 }
 
 .task__actions {
@@ -976,8 +1008,8 @@
   margin: 0;
   overflow: hidden;
   font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: var(--text-lead);
+  font-weight: var(--fw-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1043,7 +1075,7 @@
 .task-ready__source {
   margin: 0 0 24px;
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .settings-screen {
@@ -1067,8 +1099,8 @@
 .settings-screen__header h1 {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: var(--text-lead);
+  font-weight: var(--fw-semibold);
 }
 
 .settings-screen__content {
@@ -1086,8 +1118,8 @@
 .settings-field {
   display: grid;
   gap: 6px;
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: var(--text-ui);
+  font-weight: var(--fw-medium);
 }
 
 .settings-field select {
@@ -1096,7 +1128,7 @@
   border-radius: var(--radius);
   background: var(--card);
   color: var(--foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-body);
 }
 
 .task-ready__actions {
@@ -1129,9 +1161,9 @@
   padding: 10px 12px 6px;
   color: var(--muted-foreground);
   font-family: var(--font-heading);
-  font-weight: 700;
-  font-size: 0.625rem;
-  letter-spacing: 0.04em;
+  font-weight: var(--fw-bold);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
 }
 
@@ -1150,7 +1182,7 @@
   margin: 0;
   padding: 16px 12px;
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .file-tree {
@@ -1158,7 +1190,7 @@
   overflow: auto;
   padding: 8px;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .file-tree ul {
@@ -1214,7 +1246,7 @@
 
 .file-tree__directory > span:first-child {
   font-family: var(--font-sans);
-  font-size: 0.875rem;
+  font-size: var(--text-body);
 }
 
 .collapse-chevron {
@@ -1237,7 +1269,7 @@
   margin: 0;
   padding: 12px;
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
   font-style: italic;
 }
 
@@ -1257,8 +1289,8 @@
   color: var(--status-running);
   background: color-mix(in srgb, var(--status-running) 14%, transparent);
   font-family: var(--font-mono);
-  font-size: 0.625rem;
-  font-weight: 700;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-bold);
 }
 
 .file-tree .changed-files__status {
@@ -1267,7 +1299,7 @@
   height: auto;
   border-radius: 0;
   background: transparent;
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
 }
 
 .changed-files__status--added {
@@ -1300,7 +1332,7 @@
   display: flex;
   gap: 3px;
   padding-left: 4px;
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
   white-space: nowrap;
 }
 
@@ -1337,7 +1369,7 @@
   color: inherit;
   background: #f6f8fa;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--text-label);
   text-align: left;
 }
 
@@ -1352,19 +1384,19 @@
 
 .worker-screen .diff-additions {
   color: var(--diff-success);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 
 .worker-screen .diff-deletions {
   color: var(--diff-danger);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 
 .diff-file__header code {
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1373,7 +1405,7 @@
   flex: none;
   color: var(--muted-foreground);
   font-family: var(--font-sans);
-  font-size: 1rem;
+  font-size: var(--icon-glyph);
 }
 
 .diff-file__header .changed-files__status {
@@ -1382,7 +1414,7 @@
   height: auto;
   border-radius: 0;
   background: transparent;
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
 }
 
 .diff-file__header span {
@@ -1397,8 +1429,8 @@
   background: var(--background);
   font-family: var(--font-mono);
   color: var(--foreground);
-  font-size: 0.875rem;
-  line-height: 1.625;
+  font-size: var(--text-body);
+  line-height: var(--leading-relaxed);
 }
 
 .diff-code-line {
@@ -1418,7 +1450,7 @@
 
 .diff-code-line--addition .diff-code-line__marker {
   color: var(--diff-success);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 
 .diff-code-line--deletion {
@@ -1427,7 +1459,7 @@
 
 .diff-code-line--deletion .diff-code-line__marker {
   color: var(--diff-danger);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 
 .diff-code-line--hunk {
@@ -1452,7 +1484,7 @@
 .hljs-diff .hljs-char,
 .hljs-diff .hljs-addition {
   color: var(--diff-success);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .hljs-diff .hljs-number {
@@ -1500,7 +1532,7 @@
 
 .hljs-diff .hljs-deletion {
   color: var(--diff-danger);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .hljs-diff .hljs-emphasis {
@@ -1508,7 +1540,7 @@
 }
 
 .hljs-diff .hljs-strong {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .chat__header {
@@ -1523,14 +1555,14 @@
 .chat__header h1 {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 650;
-  letter-spacing: 0.02em;
+  font-size: var(--text-lead);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-heading);
 }
 
 .chat__header span {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .messages {
@@ -1550,9 +1582,9 @@
 .empty-state h2 {
   margin: 0 0 8px;
   font-family: var(--font-heading);
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: var(--text-display);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
 }
 
 .empty-state p {
@@ -1573,9 +1605,9 @@
 .message__role {
   margin-bottom: 4px;
   color: var(--muted-foreground);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.025em;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-heading);
   text-transform: uppercase;
 }
 
@@ -1589,8 +1621,8 @@
 
 .message__content {
   max-width: 72ch;
-  font-size: 1rem;
-  line-height: 1.625;
+  font-size: var(--text-lead);
+  line-height: var(--leading-relaxed);
   overflow-wrap: anywhere;
 }
 
@@ -1599,7 +1631,7 @@
 }
 
 .typeset-chat {
-  --typeset-size: 1rem;
+  --typeset-size: var(--text-lead);
   --typeset-leading: 1.625;
   --typeset-flow: 1em;
   font-size: var(--typeset-size);
@@ -1621,7 +1653,7 @@
   color: var(--muted-foreground);
   background: var(--card);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .tool-use__indicator {
@@ -1643,14 +1675,14 @@
 
 .tool-use__label {
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
 
 .tool-use__detail {
   overflow: hidden;
   color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1664,7 +1696,7 @@
 .message__status {
   margin-top: 8px;
   color: var(--destructive);
-  font-size: 0.75rem;
+  font-size: var(--text-label);
 }
 
 .thinking {
@@ -1723,7 +1755,7 @@
   color: var(--muted-foreground);
   background: transparent;
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: var(--text-micro);
 }
 
 button.composer__chip:hover:not(:disabled) {
@@ -1753,7 +1785,7 @@ button.composer__chip:disabled {
   align-items: center;
   gap: 4px;
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: var(--text-micro);
 }
 
 .composer__sendhint--active {
@@ -1770,7 +1802,7 @@ button.composer__chip:disabled {
   border-radius: var(--radius-sm);
   background: var(--background);
   font-family: var(--font-mono);
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
 }
 
 .composer__stop {
@@ -1784,8 +1816,8 @@ button.composer__chip:disabled {
   border-radius: var(--radius-sm);
   color: var(--status-running);
   background: color-mix(in oklch, var(--status-running) 10%, transparent);
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: var(--text-micro);
+  font-weight: var(--fw-semibold);
 }
 
 .composer__stop-dot {
@@ -1818,15 +1850,15 @@ button.composer__chip:disabled {
   padding: 3px 6px 3px 8px;
   border-radius: var(--radius-sm);
   background: var(--chip);
-  font-size: 0.8125rem;
+  font-size: var(--text-ui);
 }
 
 .composer-queue__label {
   flex-shrink: 0;
   color: var(--muted-foreground);
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-eyebrow);
 }
 
 .composer-queue__text {
@@ -1848,7 +1880,7 @@ button.composer__chip:disabled {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-body);
   line-height: 1;
 }
 
@@ -1863,8 +1895,8 @@ button.composer__chip:disabled {
   border: 0;
   background: transparent;
   padding: 0;
-  font-size: 1rem;
-  line-height: 1.55;
+  font-size: var(--text-lead);
+  line-height: var(--leading-normal);
   box-shadow: none;
   outline: none;
 }
@@ -1876,7 +1908,7 @@ button.composer__chip:disabled {
   border-radius: var(--radius-lg);
   color: var(--destructive);
   background: color-mix(in oklch, var(--destructive) 9%, var(--background));
-  font-size: 0.8125rem;
+  font-size: var(--text-ui);
 }
 
 @media (prefers-reduced-motion: reduce) {
