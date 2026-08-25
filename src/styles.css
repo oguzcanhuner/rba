@@ -1555,8 +1555,7 @@
   letter-spacing: -0.02em;
 }
 
-.empty-state p,
-.composer-hint {
+.empty-state p {
   margin: 0;
   color: var(--muted-foreground);
 }
@@ -1678,39 +1677,129 @@
   background: var(--surface-translucent);
 }
 
-.working-directory {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
+.composer {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
 }
 
-.working-directory span {
-  min-width: 0;
+.composer--busy {
+  border-color: color-mix(in oklch, var(--status-running) 55%, var(--input));
+}
+
+.composer:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 16%, transparent);
+}
+
+.composer__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in oklch, var(--input) 45%, var(--card));
+}
+
+.composer__spacer {
   flex: 1;
+}
+
+.composer__chip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  max-width: 320px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+button.composer__chip:hover:not(:disabled) {
+  border-color: var(--input);
+  background: var(--chip);
+}
+
+button.composer__chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.composer__chip svg {
+  flex-shrink: 0;
+}
+
+.composer__chip-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: end;
-  gap: 8px;
-  margin-inline: -12px;
-  padding: 8px;
-  border: 0;
-  background: var(--card);
-  box-shadow: none;
-}
-
-.composer__actions {
+.composer__sendhint {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+}
+
+.composer__sendhint--active {
+  color: var(--foreground);
+}
+
+.composer__sendhint kbd {
+  display: inline-flex;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border-bottom: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+}
+
+.composer__stop {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in oklch, var(--status-running) 55%, var(--input));
+  border-radius: var(--radius-sm);
+  color: var(--status-running);
+  background: color-mix(in oklch, var(--status-running) 10%, transparent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.composer__stop-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--status-running);
+  animation: tool-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer__stop-dot {
+    animation: none;
+  }
 }
 
 .composer-queue {
@@ -1726,17 +1815,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-translucent);
+  padding: 3px 6px 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--chip);
   font-size: 0.8125rem;
 }
 
 .composer-queue__label {
   flex-shrink: 0;
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1749,8 +1837,28 @@
   white-space: nowrap;
 }
 
+.composer-queue__remove {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.composer-queue__remove:hover {
+  background: var(--accent);
+}
+
 .composer .composer__input {
   min-height: 72px;
+  max-height: 40vh;
   resize: none;
   border: 0;
   background: transparent;
@@ -1758,17 +1866,7 @@
   font-size: 1rem;
   line-height: 1.55;
   box-shadow: none;
-}
-
-.composer .composer__input:focus-visible {
-  border: 0;
-  box-shadow: none;
-}
-
-.composer-hint {
-  margin-top: 8px;
-  text-align: center;
-  font-size: 0.6875rem;
+  outline: none;
 }
 
 .error-message {

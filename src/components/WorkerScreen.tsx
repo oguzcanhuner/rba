@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type { SidebarTask, WorkerRun } from '../claude';
 import type { QueuedMessage } from '../hooks/useGoalStream';
+import { basename } from '../lib/paths';
 import { workerToolLabel } from '../lib/toolLabels';
 import { Chat } from './Chat';
 import { MarkdownContent } from './MarkdownContent';
@@ -113,6 +114,9 @@ export function WorkerScreen({
   const composerPlaceholder = run.sessionId
     ? 'Ask for a change or clarification'
     : 'Available after the worker finishes';
+  const composerBusyPlaceholder = run.sessionId
+    ? "Add a follow-up — it'll queue until this turn finishes"
+    : 'Available after the worker finishes';
 
   return (
     <section className="worker-screen">
@@ -163,17 +167,17 @@ export function WorkerScreen({
             messagesError={run.error}
             draft={draft}
             queued={queued}
-            meta={
-              <div className="working-directory">
-                <span title={run.worktree}>Worktree: {run.worktree}</span>
-              </div>
-            }
+            context={{
+              icon: <WorktreeIcon />,
+              label: basename(run.worktree),
+              title: run.worktree,
+            }}
             error={error}
             isBusy={run.status === 'working'}
             composerDisabled={!run.sessionId}
             composerAriaLabel="Message worker"
             placeholder={composerPlaceholder}
-            busyPlaceholder={composerPlaceholder}
+            busyPlaceholder={composerBusyPlaceholder}
             onDraftChange={onDraftChange}
             onSubmit={onSubmit}
             onStop={onStop}
@@ -182,5 +186,26 @@ export function WorkerScreen({
         </ResizablePanel>
       </ResizablePanelGroup>
     </section>
+  );
+}
+
+function WorktreeIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
   );
 }

@@ -1,7 +1,8 @@
-import type { FormEvent, ReactNode } from 'react';
+import type { FormEvent } from 'react';
 import type { DisplayMessage, DisplayTool } from '../claude';
 import { useFollowScroll } from '../hooks/useFollowScroll';
 import type { QueuedMessage } from '../hooks/useGoalStream';
+import type { ComposerContext } from './Composer';
 import { Composer } from './Composer';
 import { MessageThread } from './MessageThread';
 
@@ -16,7 +17,7 @@ type ChatProps = {
   messagesError?: string | null;
   draft: string;
   queued: QueuedMessage[];
-  meta?: ReactNode;
+  context?: ComposerContext;
   error: string | null;
   isBusy: boolean;
   composerDisabled?: boolean;
@@ -31,7 +32,7 @@ type ChatProps = {
 
 /** The one chat visual shared by the planner and a worker's conversation:
  * header, message list, and composer. The only intended divergence between
- * callers is the meta slot above the composer (working directory vs.
+ * callers is the path chip in the composer bar (working directory vs.
  * worktree path). */
 export function Chat({
   title,
@@ -44,7 +45,7 @@ export function Chat({
   messagesError,
   draft,
   queued,
-  meta,
+  context,
   error,
   isBusy,
   composerDisabled = false,
@@ -89,7 +90,7 @@ export function Chat({
       <Composer
         draft={draft}
         queued={queued}
-        meta={meta}
+        context={context}
         error={error}
         isBusy={isBusy}
         disabled={composerDisabled}

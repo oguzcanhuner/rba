@@ -1,9 +1,9 @@
 import type { FormEvent } from 'react';
 import type { DisplayMessage } from '../claude';
 import type { QueuedMessage } from '../hooks/useGoalStream';
+import { displayPath } from '../lib/paths';
 import { plannerToolLabel } from '../lib/toolLabels';
 import { Chat } from './Chat';
-import { Button } from './ui/button';
 
 type ChatPanelProps = {
   title: string | null;
@@ -49,31 +49,40 @@ export function ChatPanel({
       }}
       draft={draft}
       queued={queued}
-      meta={
-        <div className="working-directory">
-          <span title={workingDirectory ?? undefined}>
-            Working directory: {workingDirectory ?? 'Loading…'}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            disabled={isActiveGoalBusy}
-            onClick={onChooseDirectory}
-          >
-            Choose folder
-          </Button>
-        </div>
-      }
+      context={{
+        icon: <FolderIcon />,
+        label: workingDirectory ? displayPath(workingDirectory) : 'Loading…',
+        title: workingDirectory ?? 'Loading…',
+        onClick: onChooseDirectory,
+        disabled: isActiveGoalBusy,
+      }}
       error={error}
       isBusy={isActiveGoalBusy}
       composerAriaLabel="Message RBA"
       placeholder="Message RBA"
-      busyPlaceholder="Steer RBA…"
+      busyPlaceholder="Add a follow-up — it'll queue until this turn finishes"
       onDraftChange={onDraftChange}
       onSubmit={onSubmit}
       onStop={onCancel}
       onRemoveQueued={onRemoveQueued}
     />
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+    </svg>
   );
 }
