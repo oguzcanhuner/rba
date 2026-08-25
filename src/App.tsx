@@ -12,6 +12,7 @@ import type {
   Goal,
   GoalSummary,
   GoalWithTasks,
+  SidebarTask,
   Task,
 } from './claude';
 import { ChatPanel } from './components/ChatPanel';
@@ -28,7 +29,7 @@ import { useGoalStream } from './hooks/useGoalStream';
 import { useTasks } from './hooks/useTasks';
 import { useWorkerRuns } from './hooks/useWorkerRuns';
 import {
-  byNewestCreation,
+  byGoalOrder,
   goalTitle,
   restoreInterruptedMessages,
   summaryOf,
@@ -110,7 +111,7 @@ export function App() {
         const summary = summaryOf(goal);
         setGoals((current) =>
           [summary, ...current.filter((item) => item.id !== summary.id)].sort(
-            byNewestCreation,
+            byGoalOrder,
           ),
         );
       })
@@ -184,6 +185,7 @@ export function App() {
             createdAt: now,
             updatedAt: now,
             unread: false,
+            completed: false,
           };
 
       putGoal(goal);
@@ -239,6 +241,7 @@ export function App() {
     activeWorker,
     diff: workerDiff,
     startingTaskId,
+    queued: queuedWorkerMessages,
     close: closeWorker,
     open: openTask,
     start: startTaskInBackground,
@@ -246,7 +249,10 @@ export function App() {
     complete: completeTask,
     stop: stopWorker,
     send: sendWorkerMessage,
+    enqueue: enqueueWorkerMessage,
+    removeQueued: removeQueuedWorkerMessage,
   } = useWorkerRuns({ setTaskStatus: tasks.setStatus, setError });
+  const [workerDraft, setWorkerDraft] = useState('');
 
   useEffect(() => {
     let disposed = false;
@@ -336,6 +342,7 @@ export function App() {
         setWorkingDirectory(directory);
         setActiveGoalId(null);
         closeWorker();
+        setWorkerDraft('');
         setDraft('');
         setError(null);
       }
@@ -353,6 +360,64 @@ export function App() {
     );
   }
 
+  async function renameGoal(id: string, title: string) {
+    try {
+      await window.goals.rename(id, title);
+      setGoals((current) =>
+        current
+          .map((item) => (item.id === id ? { ...item, title } : item))
+          .sort(byGoalOrder),
+      );
+      updateGoal(id, (goal) => ({ ...goal, title }));
+    } catch {
+      setError('This goal could not be renamed.');
+    }
+  }
+
+  async function completeGoal(id: string) {
+    try {
+      await window.goals.complete(id);
+      setGoals((current) =>
+        current
+          .map((item) => (item.id === id ? { ...item, completed: true } : item))
+          .sort(byGoalOrder),
+      );
+    } catch {
+      setError('This goal could not be marked as complete.');
+    }
+  }
+
+  async function reopenGoal(id: string) {
+    try {
+      await window.goals.reopen(id);
+      setGoals((current) =>
+        current
+          .map((item) =>
+            item.id === id ? { ...item, completed: false } : item,
+          )
+          .sort(byGoalOrder),
+      );
+    } catch {
+      setError('This goal could not be reopened.');
+    }
+  }
+
+  async function deleteGoal(id: string) {
+    try {
+      await window.goals.delete(id);
+      setGoals((current) => current.filter((item) => item.id !== id));
+      replaceGoalTasks(id, '', []);
+      if (id === activeGoalId) {
+        setActiveGoalId(null);
+        closeWorker();
+        setWorkerDraft('');
+        setDraft('');
+      }
+    } catch {
+      setError('This goal has started tasks and cannot be deleted.');
+    }
+  }
+
   async function selectGoal(id: string) {
     if (id === activeGoalId) {
       return;
@@ -368,6 +433,7 @@ export function App() {
       setActiveGoalId(id);
       setWorkingDirectory(cached.workingDirectory);
       closeWorker();
+      setWorkerDraft('');
       setDraft('');
       setError(null);
       markGoalRead(id);
@@ -381,6 +447,7 @@ export function App() {
         const restored = openGoal(goal);
         setWorkingDirectory(restored.workingDirectory);
         closeWorker();
+        setWorkerDraft('');
         setDraft('');
         setError(null);
         markGoalRead(id);
@@ -395,10 +462,37 @@ export function App() {
       await persistCurrentGoal();
       setActiveGoalId(null);
       closeWorker();
+      setWorkerDraft('');
       setDraft('');
       setError(null);
     } catch {
       setError('This goal could not be saved.');
+    }
+  }
+
+  function openWorkerTask(task: SidebarTask) {
+    setWorkerDraft('');
+    openTask(task);
+  }
+
+  async function submitWorkerMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = workerDraft.trim();
+    if (!content || !activeWorker?.sessionId) {
+      return;
+    }
+
+    if (activeWorker.status === 'working') {
+      // Queueing can't fail, so the draft is cleared immediately rather than
+      // waiting on a round trip.
+      setWorkerDraft('');
+      enqueueWorkerMessage(content);
+      return;
+    }
+
+    const sent = await sendWorkerMessage(content);
+    if (sent) {
+      setWorkerDraft('');
     }
   }
 
@@ -421,16 +515,17 @@ export function App() {
   return (
     <main
       className={
-        activeTask || isSettingsOpen
-          ? 'worker-shell'
+        isSettingsOpen
+          ? ''
           : `app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`
       }
     >
-      {!activeTask && !isSettingsOpen && (
+      {!isSettingsOpen && (
         <GoalSidebar
           goals={goals}
           tasks={tasks.committed}
           activeGoalId={activeGoal?.id ?? null}
+          activeTaskId={activeTask?.id ?? null}
           isCollapsed={isSidebarCollapsed}
           busyGoalIds={busyGoalIds}
           startingTaskId={startingTaskId}
@@ -439,7 +534,11 @@ export function App() {
           }
           onNewGoal={startNewGoal}
           onSelectGoal={selectGoal}
-          onOpenTask={openTask}
+          onRenameGoal={renameGoal}
+          onCompleteGoal={completeGoal}
+          onReopenGoal={reopenGoal}
+          onDeleteGoal={deleteGoal}
+          onOpenTask={openWorkerTask}
           onStartTask={startTaskInBackground}
           onCompleteTask={completeTask}
           onOpenSettings={() => setIsSettingsOpen(true)}
@@ -453,14 +552,19 @@ export function App() {
           task={activeTask}
           run={activeWorker}
           diff={workerDiff}
+          draft={workerDraft}
+          queued={queuedWorkerMessages}
           error={error}
           isStarting={startingTaskId === activeTask.id}
           onBack={() => {
             closeWorker();
+            setWorkerDraft('');
             setError(null);
           }}
+          onDraftChange={setWorkerDraft}
+          onSubmit={submitWorkerMessage}
+          onRemoveQueued={removeQueuedWorkerMessage}
           onStart={() => startWorker(activeTask)}
-          onSend={sendWorkerMessage}
           onStop={stopWorker}
           onComplete={() => completeTask(activeTask)}
         />
@@ -481,7 +585,7 @@ export function App() {
               }
               startingTaskId={startingTaskId}
               onCommit={commitTasks}
-              onOpenTask={openTask}
+              onOpenTask={openWorkerTask}
               onStartTask={startTaskInBackground}
               onCompleteTask={completeTask}
             />

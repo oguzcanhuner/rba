@@ -55,6 +55,7 @@ test('persists and lists goals', () => {
       createdAt: newer.createdAt,
       updatedAt: newer.updatedAt,
       unread: false,
+      completed: false,
     },
     {
       id: saved.id,
@@ -63,9 +64,14 @@ test('persists and lists goals', () => {
       createdAt: saved.createdAt,
       updatedAt: continued.updatedAt,
       unread: false,
+      completed: false,
     },
   ]);
-  assert.deepEqual(store.get(saved.id), { ...continued, unread: false });
+  assert.deepEqual(store.get(saved.id), {
+    ...continued,
+    unread: false,
+    completed: false,
+  });
   store.close();
 });
 
@@ -84,6 +90,101 @@ test('marks a goal unread and read', () => {
   assert.equal(store.get(saved.id).unread, false);
   assert.equal(store.list().find((item) => item.id === saved.id).unread, false);
 
+  store.close();
+});
+
+test('renames, completes, and reopens a goal', () => {
+  const store = new GoalStore(':memory:');
+  const saved = goal();
+  store.save(saved);
+
+  store.renameGoal(saved.id, 'A better title');
+  assert.equal(store.get(saved.id).title, 'A better title');
+
+  store.completeGoal(saved.id);
+  assert.equal(store.get(saved.id).completed, true);
+  assert.equal(
+    store.list().find((item) => item.id === saved.id).completed,
+    true,
+  );
+
+  store.reopenGoal(saved.id);
+  assert.equal(store.get(saved.id).completed, false);
+
+  assert.throws(() => store.renameGoal('missing', 'x'));
+  store.close();
+});
+
+test('sorts completed goals after active ones', () => {
+  const store = new GoalStore(':memory:');
+  const older = goal({
+    id: 'goal-older',
+    createdAt: '2026-08-09T09:00:00.000Z',
+    updatedAt: '2026-08-09T09:00:00.000Z',
+  });
+  const newer = goal({
+    id: 'goal-newer',
+    createdAt: '2026-08-09T10:00:00.000Z',
+    updatedAt: '2026-08-09T10:00:00.000Z',
+  });
+  store.save(older);
+  store.save(newer);
+  store.completeGoal(newer.id);
+
+  assert.deepEqual(
+    store.list().map((item) => item.id),
+    [older.id, newer.id],
+  );
+  store.close();
+});
+
+test('deletes a goal only when it has no started tasks', () => {
+  const store = new GoalStore(':memory:');
+  const saved = goal();
+  store.save(saved);
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, 1, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-1',
+      saved.id,
+      'A queued task',
+      'Do the thing.',
+      saved.createdAt,
+      saved.createdAt,
+    );
+
+  store.deleteGoal(saved.id);
+  assert.equal(store.get(saved.id), null);
+  store.close();
+});
+
+test('refuses to delete a goal with a started task', () => {
+  const store = new GoalStore(':memory:');
+  const saved = goal();
+  store.save(saved);
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, 1, ?, ?, 'working', ?, ?)
+    `)
+    .run(
+      'task-1',
+      saved.id,
+      'A working task',
+      'Do the thing.',
+      saved.createdAt,
+      saved.createdAt,
+    );
+
+  assert.throws(() => store.deleteGoal(saved.id));
+  assert.notEqual(store.get(saved.id), null);
   store.close();
 });
 
@@ -127,7 +228,11 @@ test('stores provider-neutral agent sessions and message updates', () => {
   store.save(initial);
   store.save(updated);
 
-  assert.deepEqual(store.get(initial.id), { ...updated, unread: false });
+  assert.deepEqual(store.get(initial.id), {
+    ...updated,
+    unread: false,
+    completed: false,
+  });
 
   const codexSession = {
     ...agentSession,
@@ -142,6 +247,7 @@ test('stores provider-neutral agent sessions and message updates', () => {
   assert.deepEqual(store.get(initial.id), {
     ...switchedProvider,
     unread: false,
+    completed: false,
   });
   store.close();
 });
@@ -238,7 +344,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9, 10],
+    [1, 2, 3, 4, 5, 8, 9, 10, 11],
   );
   store.close();
 });
@@ -282,7 +388,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9, 10],
+    [1, 2, 3, 4, 5, 8, 9, 10, 11],
   );
   store.close();
 });

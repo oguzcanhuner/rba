@@ -53,6 +53,15 @@ export function byNewestCreation(left: GoalSummary, right: GoalSummary) {
   return right.createdAt.localeCompare(left.createdAt);
 }
 
+/** Completed goals sink to the bottom of the list; each group otherwise
+ * keeps newest-first order. */
+export function byGoalOrder(left: GoalSummary, right: GoalSummary) {
+  if (left.completed !== right.completed) {
+    return left.completed ? 1 : -1;
+  }
+  return byNewestCreation(left, right);
+}
+
 export function restoreInterruptedMessages(goal: Goal): Goal {
   return {
     ...goal,

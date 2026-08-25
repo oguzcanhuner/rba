@@ -192,6 +192,17 @@ const migrations = [
       }
     },
   },
+  {
+    version: 11,
+    isApplied(database) {
+      return hasColumn(database, 'goals', 'completed_at');
+    },
+    up(database) {
+      if (!hasColumn(database, 'goals', 'completed_at')) {
+        database.exec('ALTER TABLE goals ADD COLUMN completed_at TEXT');
+      }
+    },
+  },
 ];
 
 function migrate(database) {
@@ -329,12 +340,17 @@ class GoalStore {
           working_directory AS workingDirectory,
           created_at AS createdAt,
           updated_at AS updatedAt,
-          unread
+          unread,
+          completed_at AS completedAt
         FROM goals
-        ORDER BY created_at DESC
+        ORDER BY (completed_at IS NOT NULL), created_at DESC
       `)
       .all()
-      .map((row) => ({ ...row, unread: Boolean(row.unread) }));
+      .map(({ completedAt, ...row }) => ({
+        ...row,
+        unread: Boolean(row.unread),
+        completed: completedAt !== null,
+      }));
   }
 
   get(id) {
@@ -346,7 +362,8 @@ class GoalStore {
           working_directory AS workingDirectory,
           created_at AS createdAt,
           updated_at AS updatedAt,
-          unread
+          unread,
+          completed_at AS completedAt
         FROM goals
         WHERE id = ?
       `)
@@ -356,6 +373,8 @@ class GoalStore {
       return null;
     }
     goal.unread = Boolean(goal.unread);
+    goal.completed = goal.completedAt !== null;
+    delete goal.completedAt;
 
     const sessionRow = this.database
       .prepare(`
@@ -816,6 +835,60 @@ class GoalStore {
 
   markRead(goalId) {
     this.markGoalRead.run(goalId);
+  }
+
+  renameGoal(goalId, title) {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare('UPDATE goals SET title = ?, updated_at = ? WHERE id = ?')
+      .run(title, now, goalId);
+    if (result.changes === 0) {
+      throw new Error('This goal no longer exists.');
+    }
+  }
+
+  completeGoal(goalId) {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare('UPDATE goals SET completed_at = ?, updated_at = ? WHERE id = ?')
+      .run(now, now, goalId);
+    if (result.changes === 0) {
+      throw new Error('This goal no longer exists.');
+    }
+  }
+
+  reopenGoal(goalId) {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare(
+        'UPDATE goals SET completed_at = NULL, updated_at = ? WHERE id = ?',
+      )
+      .run(now, goalId);
+    if (result.changes === 0) {
+      throw new Error('This goal no longer exists.');
+    }
+  }
+
+  /** Deletes a goal outright, allowed only while every task is still in a
+   * pre-start state, since a started task's worktree and branch would
+   * otherwise be orphaned by the cascade. */
+  deleteGoal(goalId) {
+    const startedTask = this.database
+      .prepare(`
+        SELECT 1 FROM tasks
+        WHERE goal_id = ? AND status NOT IN ('draft', 'queued')
+        LIMIT 1
+      `)
+      .get(goalId);
+    if (startedTask) {
+      throw new Error('This goal has started tasks and cannot be deleted.');
+    }
+    const result = this.database
+      .prepare('DELETE FROM goals WHERE id = ?')
+      .run(goalId);
+    if (result.changes === 0) {
+      throw new Error('This goal no longer exists.');
+    }
   }
 
   close() {

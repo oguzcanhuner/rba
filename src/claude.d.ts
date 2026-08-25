@@ -81,6 +81,7 @@ export type GoalSummary = {
   createdAt: string;
   updatedAt: string;
   unread: boolean;
+  completed: boolean;
 };
 
 export type Artifact = {
@@ -164,6 +165,10 @@ declare global {
       save(goal: Goal): Promise<void>;
       markRead(id: string): Promise<void>;
       markUnread(id: string): Promise<void>;
+      rename(id: string, title: string): Promise<void>;
+      complete(id: string): Promise<void>;
+      reopen(id: string): Promise<void>;
+      delete(id: string): Promise<void>;
       commitTasks(goalId: string): Promise<Task[]>;
     };
     tasks: {

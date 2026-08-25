@@ -1,33 +1,30 @@
-import {
-  type FormEvent,
-  type KeyboardEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type { SidebarTask, WorkerRun } from '../claude';
+import type { QueuedMessage } from '../hooks/useGoalStream';
 import { workerToolLabel } from '../lib/toolLabels';
+import { Chat } from './Chat';
 import { MarkdownContent } from './MarkdownContent';
-import { MessageThread } from './MessageThread';
 import { Button } from './ui/button';
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from './ui/resizable';
-import { Textarea } from './ui/textarea';
 import { parseWorkerDiff, WorkerDiff, WorkerFileTree } from './WorkerDiff';
 
 type WorkerScreenProps = {
   task: SidebarTask;
   run: WorkerRun | null;
   diff: string;
+  draft: string;
+  queued: QueuedMessage[];
   error: string | null;
   isStarting: boolean;
   onBack: () => void;
-  onSend: (message: string) => Promise<boolean>;
+  onDraftChange: (draft: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onRemoveQueued: (id: string) => void;
   onStart: () => void;
   onStop: () => void;
   onComplete: () => void;
@@ -37,10 +34,14 @@ export function WorkerScreen({
   task,
   run,
   diff,
+  draft,
+  queued,
   error,
   isStarting,
   onBack,
-  onSend,
+  onDraftChange,
+  onSubmit,
+  onRemoveQueued,
   onStart,
   onStop,
   onComplete,
@@ -50,9 +51,6 @@ export function WorkerScreen({
     panelIds: ['review', 'worker-chat'],
     storage: window.localStorage,
   });
-  const messages = useRef<HTMLElement>(null);
-  const [draft, setDraft] = useState('');
-  const [isSending, setIsSending] = useState(false);
   const changedFiles = useMemo(() => parseWorkerDiff(diff), [diff]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
@@ -66,44 +64,6 @@ export function WorkerScreen({
       setSelectedFile(changedFiles[0].path);
     }
   }, [changedFiles, selectedFile]);
-
-  useEffect(() => {
-    const container = messages.current;
-    if (container) {
-      container.scrollTop = container.scrollHeight;
-    }
-  });
-
-  async function submitMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const message = draft.trim();
-    if (
-      !run ||
-      !message ||
-      isSending ||
-      run.status === 'working' ||
-      !run.sessionId
-    ) {
-      return;
-    }
-    setIsSending(true);
-    const sent = await onSend(message);
-    if (sent) {
-      setDraft('');
-    }
-    setIsSending(false);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (
-      event.key === 'Enter' &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
-    ) {
-      event.preventDefault();
-      event.currentTarget.form?.requestSubmit();
-    }
-  }
 
   function selectFile(path: string) {
     setSelectedFile(path);
@@ -149,6 +109,10 @@ export function WorkerScreen({
     );
   }
 
+  const composerPlaceholder = run.sessionId
+    ? 'Ask for a change or clarification'
+    : 'Available after the worker finishes';
+
   return (
     <section className="worker-screen">
       <header className="worker-screen__header">
@@ -192,64 +156,31 @@ export function WorkerScreen({
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={30} id="worker-chat" minSize={28}>
-          <section className="worker-chat">
-            <header className="worker-chat__header">
-              <h2>Conversation</h2>
-              <span>Sonnet</span>
-            </header>
-            <section
-              className="messages worker-screen__messages"
-              aria-live="polite"
-              ref={messages}
-            >
-              <MessageThread
-                assistantLabel="Worker"
-                messages={run.messages}
-                toolLabel={workerToolLabel}
-              />
-              {run.error && <div className="error-message">{run.error}</div>}
-            </section>
-
-            <footer className="composer-area worker-composer-area">
-              {error && <div className="error-message">{error}</div>}
+          <Chat
+            title="Conversation"
+            assistantLabel="Worker"
+            toolLabel={workerToolLabel}
+            messages={run.messages}
+            scrollKey={task.id}
+            messagesError={run.error}
+            draft={draft}
+            queued={queued}
+            meta={
               <div className="working-directory">
                 <span title={run.worktree}>Worktree: {run.worktree}</span>
               </div>
-              <form className="composer" onSubmit={submitMessage}>
-                <Textarea
-                  className="composer__input"
-                  aria-label="Message worker"
-                  disabled={
-                    run.status === 'working' || isSending || !run.sessionId
-                  }
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    run.sessionId
-                      ? 'Ask for a change or clarification'
-                      : 'Available after the worker finishes'
-                  }
-                  rows={3}
-                  value={draft}
-                />
-                {run.status === 'working' ? (
-                  <Button type="button" variant="secondary" onClick={onStop}>
-                    Stop
-                  </Button>
-                ) : (
-                  <Button
-                    type="submit"
-                    disabled={!draft.trim() || isSending || !run.sessionId}
-                  >
-                    Send
-                  </Button>
-                )}
-              </form>
-              <p className="composer-hint">
-                Enter to send · Shift+Enter for a new line
-              </p>
-            </footer>
-          </section>
+            }
+            error={error}
+            isBusy={run.status === 'working'}
+            composerDisabled={!run.sessionId}
+            composerAriaLabel="Message worker"
+            placeholder={composerPlaceholder}
+            busyPlaceholder={composerPlaceholder}
+            onDraftChange={onDraftChange}
+            onSubmit={onSubmit}
+            onStop={onStop}
+            onRemoveQueued={onRemoveQueued}
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
     </section>

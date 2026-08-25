@@ -1,16 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import plusIcon from '../assets/plus.svg';
 import settingsIcon from '../assets/settings.svg';
 import sidebarCollapseIcon from '../assets/sidebar-collapse.svg';
 import type { GoalSummary, SidebarTask } from '../claude';
+import { goalContextMenuItems } from '../lib/goalContextMenuItems';
+import { formatRelativeTime } from '../lib/relativeTime';
 import { taskContextMenuItems } from '../lib/taskContextMenuItems';
 import { Button } from './ui/button';
 import { ContextMenu } from './ui/context-menu';
+
+function taskStatusLabel(status: SidebarTask['status']) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function countOpenTasks(tasks: SidebarTask[], goalId: string) {
+  return tasks.filter(
+    (task) => task.goalId === goalId && task.status !== 'merged',
+  ).length;
+}
+
+function hasStartedTasks(tasks: SidebarTask[], goalId: string) {
+  return tasks.some(
+    (task) => task.goalId === goalId && task.status !== 'queued',
+  );
+}
 
 type GoalSidebarProps = {
   goals: GoalSummary[];
   tasks: SidebarTask[];
   activeGoalId: string | null;
+  activeTaskId: string | null;
   isCollapsed: boolean;
   /** Goals with a turn currently streaming, whether or not displayed. */
   busyGoalIds: Set<string>;
@@ -18,6 +37,10 @@ type GoalSidebarProps = {
   onToggleCollapse: () => void;
   onNewGoal: () => void;
   onSelectGoal: (id: string) => void;
+  onRenameGoal: (id: string, title: string) => void;
+  onCompleteGoal: (id: string) => void;
+  onReopenGoal: (id: string) => void;
+  onDeleteGoal: (id: string) => void;
   onOpenTask: (task: SidebarTask) => void;
   onStartTask: (task: SidebarTask) => void;
   onCompleteTask: (task: SidebarTask) => void;
@@ -28,12 +51,17 @@ export function GoalSidebar({
   goals,
   tasks,
   activeGoalId,
+  activeTaskId,
   isCollapsed,
   busyGoalIds,
   startingTaskId,
   onToggleCollapse,
   onNewGoal,
   onSelectGoal,
+  onRenameGoal,
+  onCompleteGoal,
+  onReopenGoal,
+  onDeleteGoal,
   onOpenTask,
   onStartTask,
   onCompleteTask,
@@ -44,6 +72,33 @@ export function GoalSidebar({
     x: number;
     y: number;
   } | null>(null);
+  const [goalContextMenu, setGoalContextMenu] = useState<{
+    goal: GoalSummary;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renamingGoalId, setRenamingGoalId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renamingGoalId) {
+      renameInputRef.current?.focus();
+    }
+  }, [renamingGoalId]);
+
+  function startRenaming(goal: GoalSummary) {
+    setRenamingGoalId(goal.id);
+    setRenameValue(goal.title);
+  }
+
+  function commitRename(goal: GoalSummary) {
+    const title = renameValue.trim();
+    setRenamingGoalId(null);
+    if (title && title !== goal.title) {
+      onRenameGoal(goal.id, title);
+    }
+  }
   return (
     <aside
       className="goal-sidebar"
@@ -94,37 +149,77 @@ export function GoalSidebar({
             {goals.length === 0 ? (
               <p className="goal-list__empty">No goals yet</p>
             ) : (
-              goals.map((goal) => (
-                <Button
-                  className="goal-list__item"
-                  type="button"
-                  variant="ghost"
-                  key={goal.id}
-                  aria-current={goal.id === activeGoalId ? 'page' : undefined}
-                  aria-busy={busyGoalIds.has(goal.id)}
-                  title={goal.title}
-                  onClick={() => onSelectGoal(goal.id)}
-                >
-                  <span className="goal-list__title">{goal.title}</span>
-                  {busyGoalIds.has(goal.id) ? (
-                    <span
-                      className="goal-list__busy-indicator"
-                      role="status"
-                      aria-label="Working"
-                      title="Working"
-                    />
-                  ) : (
-                    goal.unread && (
-                      <span
-                        className="goal-list__unread-indicator"
-                        role="status"
-                        aria-label="Unread"
-                        title="Unread"
+              goals.map((goal) => {
+                const openTaskCount = countOpenTasks(tasks, goal.id);
+
+                if (renamingGoalId === goal.id) {
+                  return (
+                    <div
+                      className="goal-list__item goal-list__item--editing"
+                      key={goal.id}
+                    >
+                      <input
+                        ref={renameInputRef}
+                        className="goal-list__rename-input"
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onBlur={() => commitRename(goal)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.currentTarget.blur();
+                          } else if (event.key === 'Escape') {
+                            setRenamingGoalId(null);
+                          }
+                        }}
                       />
-                    )
-                  )}
-                </Button>
-              ))
+                    </div>
+                  );
+                }
+
+                return (
+                  <Button
+                    className={`goal-list__item${goal.completed ? ' goal-list__item--completed' : ''}`}
+                    type="button"
+                    variant="ghost"
+                    key={goal.id}
+                    aria-current={goal.id === activeGoalId ? 'page' : undefined}
+                    aria-busy={busyGoalIds.has(goal.id)}
+                    title={goal.title}
+                    onClick={() => onSelectGoal(goal.id)}
+                    onDoubleClick={() => startRenaming(goal)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setGoalContextMenu({
+                        goal,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                  >
+                    <span className="goal-list__title">{goal.title}</span>
+                    {openTaskCount > 0 && (
+                      <span className="goal-list__count">{openTaskCount}</span>
+                    )}
+                    {busyGoalIds.has(goal.id) ? (
+                      <span
+                        className="goal-list__busy-indicator"
+                        role="status"
+                        aria-label="Working"
+                        title="Working"
+                      />
+                    ) : (
+                      goal.unread && (
+                        <span
+                          className="goal-list__unread-indicator"
+                          role="status"
+                          aria-label="Unread"
+                          title="Unread"
+                        />
+                      )
+                    )}
+                  </Button>
+                );
+              })
             )}
           </nav>
           <section
@@ -138,12 +233,17 @@ export function GoalSidebar({
               <div className="sidebar-task-list">
                 {tasks.map((task) => (
                   <Button
-                    className="sidebar-task"
+                    className={`sidebar-task${task.status === 'merged' ? ' sidebar-task--merged' : ''}`}
                     type="button"
                     variant="ghost"
                     key={task.id}
+                    aria-current={task.id === activeTaskId ? 'page' : undefined}
                     title={task.title}
-                    onClick={() => onOpenTask(task)}
+                    onClick={() => {
+                      if (task.status !== 'merged') {
+                        onOpenTask(task);
+                      }
+                    }}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       setContextMenu({
@@ -159,7 +259,10 @@ export function GoalSidebar({
                     />
                     <span className="sr-only">{task.status}</span>
                     <span className="sidebar-task__title">{task.title}</span>
-                    <span className="sidebar-task__goal">{task.goalTitle}</span>
+                    <span className="sidebar-task__meta">
+                      {taskStatusLabel(task.status)} ·{' '}
+                      {formatRelativeTime(task.updatedAt)}
+                    </span>
                   </Button>
                 ))}
               </div>
@@ -195,6 +298,20 @@ export function GoalSidebar({
             onStartTask,
             onCompleteTask,
             onSelectGoal: () => onSelectGoal(contextMenu.task.goalId),
+          })}
+        />
+      )}
+      {goalContextMenu && (
+        <ContextMenu
+          position={{ x: goalContextMenu.x, y: goalContextMenu.y }}
+          onClose={() => setGoalContextMenu(null)}
+          items={goalContextMenuItems({
+            goal: goalContextMenu.goal,
+            hasStartedTasks: hasStartedTasks(tasks, goalContextMenu.goal.id),
+            onRename: () => startRenaming(goalContextMenu.goal),
+            onComplete: () => onCompleteGoal(goalContextMenu.goal.id),
+            onReopen: () => onReopenGoal(goalContextMenu.goal.id),
+            onDelete: () => onDeleteGoal(goalContextMenu.goal.id),
           })}
         />
       )}

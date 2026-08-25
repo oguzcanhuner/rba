@@ -3,9 +3,12 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   useState,
 } from 'react';
 import type { SidebarTask, TaskStatus, WorkerRun } from '../claude';
+import type { QueuedMessage } from './useGoalStream';
 
 type WorkerRunsOptions = {
   setTaskStatus: (taskId: string, status: TaskStatus) => void;
@@ -14,13 +17,31 @@ type WorkerRunsOptions = {
 
 /**
  * Owns the task the user has opened and the worker running against it,
- * including the diff of the worktree it is editing.
+ * including the diff of the worktree it is editing, and the follow-up
+ * messages queued for background tasks the user has switched away from.
  */
 export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
   const [activeTask, setActiveTask] = useState<SidebarTask | null>(null);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
   const [diff, setDiff] = useState('');
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
+  // Queued follow-ups, keyed by taskId rather than a flat list: a worker
+  // keeps running in the background after the user switches to another
+  // task, so a flat queue would deliver a message to the wrong worker.
+  const [queues, setQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
+  const queuesRef = useRef(queues);
+  queuesRef.current = queues;
+
+  const clearQueue = useCallback((taskId: string) => {
+    setQueues((current) => {
+      if (!current.has(taskId)) {
+        return current;
+      }
+      const next = new Map(current);
+      next.delete(taskId);
+      return next;
+    });
+  }, []);
 
   useEffect(
     () =>
@@ -35,8 +56,40 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
             ? { ...current, status: run.status }
             : current,
         );
+
+        // Drain one queued follow-up once this worker is sendable again,
+        // regardless of which task is currently displayed.
+        if (run.status !== 'working' && run.sessionId) {
+          const pending = queuesRef.current.get(run.taskId);
+          if (pending && pending.length > 0) {
+            const [next, ...rest] = pending;
+            setQueues((current) => {
+              const nextQueues = new Map(current);
+              if (rest.length === 0) {
+                nextQueues.delete(run.taskId);
+              } else {
+                nextQueues.set(run.taskId, rest);
+              }
+              return nextQueues;
+            });
+            window.workers
+              .send(run.taskId, next.text)
+              .then((updated) => {
+                setActiveWorker((current) =>
+                  current?.taskId === updated.taskId ? updated : current,
+                );
+              })
+              .catch(() => {
+                setError('This message could not be sent to the worker.');
+                // A failed send shouldn't silently fire the rest of the
+                // queue against a broken worker; surface the error and let
+                // the user decide.
+                clearQueue(run.taskId);
+              });
+          }
+        }
       }),
-    [setTaskStatus],
+    [setTaskStatus, setError, clearQueue],
   );
 
   useEffect(() => {
@@ -144,11 +197,12 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
         setActiveTask((current) =>
           current?.id === task.id ? { ...current, status: 'merged' } : current,
         );
+        clearQueue(task.id);
       } catch {
         setError('This task could not be marked as merged.');
       }
     },
-    [setTaskStatus, setError],
+    [setTaskStatus, setError, clearQueue],
   );
 
   const stop = useCallback(async () => {
@@ -158,10 +212,11 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
 
     try {
       setActiveWorker(await window.workers.stop(activeWorker.taskId));
+      clearQueue(activeWorker.taskId);
     } catch {
       setError('This worker could not be stopped.');
     }
-  }, [activeWorker, setError]);
+  }, [activeWorker, setError, clearQueue]);
 
   const send = useCallback(
     async (message: string) => {
@@ -183,11 +238,59 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
     [activeWorker, setError],
   );
 
+  const enqueue = useCallback(
+    (text: string) => {
+      const taskId = activeTask?.id;
+      if (!taskId) {
+        return;
+      }
+      setQueues((current) => {
+        const next = new Map(current);
+        next.set(taskId, [
+          ...(next.get(taskId) ?? []),
+          { id: crypto.randomUUID(), text },
+        ]);
+        return next;
+      });
+    },
+    [activeTask],
+  );
+
+  const removeQueued = useCallback(
+    (id: string) => {
+      const taskId = activeTask?.id;
+      if (!taskId) {
+        return;
+      }
+      setQueues((current) => {
+        const list = current.get(taskId);
+        if (!list) {
+          return current;
+        }
+        const filtered = list.filter((message) => message.id !== id);
+        const next = new Map(current);
+        if (filtered.length === 0) {
+          next.delete(taskId);
+        } else {
+          next.set(taskId, filtered);
+        }
+        return next;
+      });
+    },
+    [activeTask],
+  );
+
+  const queued = useMemo(
+    () => (activeTask ? (queues.get(activeTask.id) ?? []) : []),
+    [queues, activeTask],
+  );
+
   return {
     activeTask,
     activeWorker,
     diff,
     startingTaskId,
+    queued,
     close,
     open,
     start,
@@ -195,5 +298,7 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
     complete,
     stop,
     send,
+    enqueue,
+    removeQueued,
   };
 }

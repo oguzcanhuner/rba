@@ -1,10 +1,9 @@
 import type { FormEvent } from 'react';
 import type { DisplayMessage } from '../claude';
-import { useFollowScroll } from '../hooks/useFollowScroll';
 import type { QueuedMessage } from '../hooks/useGoalStream';
 import { plannerToolLabel } from '../lib/toolLabels';
-import { Composer } from './Composer';
-import { MessageThread } from './MessageThread';
+import { Chat } from './Chat';
+import { Button } from './ui/button';
 
 type ChatPanelProps = {
   title: string | null;
@@ -37,47 +36,44 @@ export function ChatPanel({
   onChooseDirectory,
   onRemoveQueued,
 }: ChatPanelProps) {
-  const follow = useFollowScroll(goalId, messages);
-
   return (
-    <section className="chat">
-      <header className="chat__header">
-        <h1>{title ?? 'RBA'}</h1>
-        <span>Sonnet</span>
-      </header>
-
-      <section
-        className="messages"
-        aria-live="polite"
-        ref={follow.ref}
-        onScroll={follow.onScroll}
-      >
-        {messages.length === 0 ? (
-          <div className="empty-state">
-            <h2>What would you like to achieve?</h2>
-            <p>Describe a feature, problem, or idea to begin.</p>
-          </div>
-        ) : (
-          <MessageThread
-            assistantLabel="RBA"
-            messages={messages}
-            toolLabel={plannerToolLabel}
-          />
-        )}
-      </section>
-
-      <Composer
-        draft={draft}
-        queued={queued}
-        workingDirectory={workingDirectory}
-        error={error}
-        isActiveGoalBusy={isActiveGoalBusy}
-        onDraftChange={onDraftChange}
-        onSubmit={onSubmit}
-        onCancel={onCancel}
-        onChooseDirectory={onChooseDirectory}
-        onRemoveQueued={onRemoveQueued}
-      />
-    </section>
+    <Chat
+      title={title ?? 'RBA'}
+      assistantLabel="RBA"
+      toolLabel={plannerToolLabel}
+      messages={messages}
+      scrollKey={goalId}
+      emptyState={{
+        title: 'What would you like to achieve?',
+        description: 'Describe a feature, problem, or idea to begin.',
+      }}
+      draft={draft}
+      queued={queued}
+      meta={
+        <div className="working-directory">
+          <span title={workingDirectory ?? undefined}>
+            Working directory: {workingDirectory ?? 'Loading…'}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={isActiveGoalBusy}
+            onClick={onChooseDirectory}
+          >
+            Choose folder
+          </Button>
+        </div>
+      }
+      error={error}
+      isBusy={isActiveGoalBusy}
+      composerAriaLabel="Message RBA"
+      placeholder="Message RBA"
+      busyPlaceholder="Steer RBA…"
+      onDraftChange={onDraftChange}
+      onSubmit={onSubmit}
+      onStop={onCancel}
+      onRemoveQueued={onRemoveQueued}
+    />
   );
 }

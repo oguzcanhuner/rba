@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('goals', {
   save: (goal) => ipcRenderer.invoke('goals:save', goal),
   markRead: (id) => ipcRenderer.invoke('goals:mark-read', id),
   markUnread: (id) => ipcRenderer.invoke('goals:mark-unread', id),
+  rename: (id, title) => ipcRenderer.invoke('goals:rename', id, title),
+  complete: (id) => ipcRenderer.invoke('goals:complete', id),
+  reopen: (id) => ipcRenderer.invoke('goals:reopen', id),
+  delete: (id) => ipcRenderer.invoke('goals:delete', id),
   commitTasks: (goalId) => ipcRenderer.invoke('goals:commit-tasks', goalId),
 });
 

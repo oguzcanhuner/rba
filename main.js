@@ -454,6 +454,61 @@ ipcMain.handle('goals:mark-unread', (event, goalId) => {
   goalStore.markUnread(goalId);
 });
 
+ipcMain.handle('goals:rename', (event, goalId, title) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100 ||
+    typeof title !== 'string' ||
+    title.trim().length === 0 ||
+    title.length > 200
+  ) {
+    throw new Error('Invalid goal rename request.');
+  }
+
+  goalStore.renameGoal(goalId, title.trim());
+});
+
+ipcMain.handle('goals:complete', (event, goalId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100
+  ) {
+    throw new Error('Invalid goal request.');
+  }
+
+  goalStore.completeGoal(goalId);
+});
+
+ipcMain.handle('goals:reopen', (event, goalId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100
+  ) {
+    throw new Error('Invalid goal request.');
+  }
+
+  goalStore.reopenGoal(goalId);
+});
+
+ipcMain.handle('goals:delete', (event, goalId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof goalId !== 'string' ||
+    goalId.length === 0 ||
+    goalId.length > 100
+  ) {
+    throw new Error('Invalid goal request.');
+  }
+
+  goalStore.deleteGoal(goalId);
+});
+
 ipcMain.handle('goals:commit-tasks', (event, goalId) => {
   if (
     !isTrustedSender(event.senderFrame) ||

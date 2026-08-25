@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import type { QueuedMessage } from '../hooks/useGoalStream';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -6,13 +6,16 @@ import { Textarea } from './ui/textarea';
 type ComposerProps = {
   draft: string;
   queued: QueuedMessage[];
-  workingDirectory: string | null;
+  meta?: ReactNode;
   error: string | null;
-  isActiveGoalBusy: boolean;
+  isBusy: boolean;
+  disabled?: boolean;
+  ariaLabel: string;
+  placeholder: string;
+  busyPlaceholder: string;
   onDraftChange: (draft: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onCancel: () => void;
-  onChooseDirectory: () => void;
+  onStop: () => void;
   onRemoveQueued: (id: string) => void;
 };
 
@@ -30,32 +33,22 @@ function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
 export function Composer({
   draft,
   queued,
-  workingDirectory,
+  meta,
   error,
-  isActiveGoalBusy,
+  isBusy,
+  disabled = false,
+  ariaLabel,
+  placeholder,
+  busyPlaceholder,
   onDraftChange,
   onSubmit,
-  onCancel,
-  onChooseDirectory,
+  onStop,
   onRemoveQueued,
 }: ComposerProps) {
   return (
     <footer className="composer-area">
       {error && <div className="error-message">{error}</div>}
-      <div className="working-directory">
-        <span title={workingDirectory ?? undefined}>
-          Working directory: {workingDirectory ?? 'Loading…'}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          disabled={isActiveGoalBusy}
-          onClick={onChooseDirectory}
-        >
-          Choose folder
-        </Button>
-      </div>
+      {meta}
       {queued.length > 0 && (
         <ul className="composer-queue" aria-label="Queued messages">
           {queued.map((message) => (
@@ -78,26 +71,27 @@ export function Composer({
       <form className="composer" onSubmit={onSubmit}>
         <Textarea
           className="composer__input"
-          aria-label="Message RBA"
+          aria-label={ariaLabel}
+          disabled={disabled}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isActiveGoalBusy ? 'Steer RBA…' : 'Message RBA'}
+          placeholder={isBusy ? busyPlaceholder : placeholder}
           rows={3}
           value={draft}
         />
         <div className="composer__actions">
-          <Button type="submit" disabled={!draft.trim()}>
-            {isActiveGoalBusy ? 'Queue' : 'Send'}
+          <Button type="submit" disabled={!draft.trim() || disabled}>
+            {isBusy ? 'Queue' : 'Send'}
           </Button>
-          {isActiveGoalBusy && (
-            <Button type="button" variant="secondary" onClick={onCancel}>
+          {isBusy && (
+            <Button type="button" variant="secondary" onClick={onStop}>
               Stop
             </Button>
           )}
         </div>
       </form>
       <p className="composer-hint">
-        {isActiveGoalBusy
+        {isBusy
           ? 'Enter to queue · sends when the current turn finishes'
           : 'Enter to send · Shift+Enter for a new line'}
       </p>
