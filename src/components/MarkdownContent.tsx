@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -8,7 +9,10 @@ type MarkdownContentProps = {
   className?: string;
 };
 
-export function MarkdownContent({ children, className }: MarkdownContentProps) {
+export const MarkdownContent = memo(function MarkdownContent({
+  children,
+  className,
+}: MarkdownContentProps) {
   return (
     <div className={cn('typeset typeset-chat', className)}>
       <ReactMarkdown
@@ -22,4 +26,4 @@ export function MarkdownContent({ children, className }: MarkdownContentProps) {
       </ReactMarkdown>
     </div>
   );
-}
+});
