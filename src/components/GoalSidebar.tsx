@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { List, type RowComponentProps } from 'react-window';
 import plusIcon from '../assets/plus.svg';
 import settingsIcon from '../assets/settings.svg';
 import sidebarCollapseIcon from '../assets/sidebar-collapse.svg';
@@ -9,6 +10,9 @@ import { taskContextMenuItems } from '../lib/taskContextMenuItems';
 import { TaskStatusIndicator } from './TaskStatusIndicator';
 import { Button } from './ui/button';
 import { ContextMenu } from './ui/context-menu';
+
+const GOAL_ROW_HEIGHT = 36;
+const TASK_ROW_HEIGHT = 52;
 
 function taskStatusLabel(status: SidebarTask['status']) {
   return status.charAt(0).toUpperCase() + status.slice(1);
@@ -47,6 +51,152 @@ type GoalSidebarProps = {
   onCompleteTask: (task: SidebarTask) => void;
   onOpenSettings: () => void;
 };
+
+type GoalRowProps = {
+  goals: GoalSummary[];
+  tasks: SidebarTask[];
+  activeGoalId: string | null;
+  busyGoalIds: Set<string>;
+  renamingGoalId: string | null;
+  renameValue: string;
+  renameInputRef: React.RefObject<HTMLInputElement | null>;
+  onSelectGoal: (id: string) => void;
+  onStartRenaming: (goal: GoalSummary) => void;
+  onRenameValueChange: (value: string) => void;
+  onCommitRename: (goal: GoalSummary) => void;
+  onCancelRename: () => void;
+  onContextMenu: (goal: GoalSummary, x: number, y: number) => void;
+};
+
+function GoalRow({
+  index,
+  style,
+  goals,
+  tasks,
+  activeGoalId,
+  busyGoalIds,
+  renamingGoalId,
+  renameValue,
+  renameInputRef,
+  onSelectGoal,
+  onStartRenaming,
+  onRenameValueChange,
+  onCommitRename,
+  onCancelRename,
+  onContextMenu,
+}: RowComponentProps<GoalRowProps>) {
+  const goal = goals[index];
+  const openTaskCount = countOpenTasks(tasks, goal.id);
+
+  if (renamingGoalId === goal.id) {
+    return (
+      <div className="goal-list__item goal-list__item--editing" style={style}>
+        <input
+          ref={renameInputRef}
+          className="goal-list__rename-input"
+          value={renameValue}
+          onChange={(event) => onRenameValueChange(event.target.value)}
+          onBlur={() => onCommitRename(goal)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur();
+            } else if (event.key === 'Escape') {
+              onCancelRename();
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      className={`goal-list__item${goal.completed ? ' goal-list__item--completed' : ''}`}
+      type="button"
+      variant="ghost"
+      style={style}
+      aria-current={goal.id === activeGoalId ? 'page' : undefined}
+      aria-busy={busyGoalIds.has(goal.id)}
+      title={goal.title}
+      onClick={() => onSelectGoal(goal.id)}
+      onDoubleClick={() => onStartRenaming(goal)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu(goal, event.clientX, event.clientY);
+      }}
+    >
+      <span className="goal-list__title">{goal.title}</span>
+      {openTaskCount > 0 && (
+        <span className="goal-list__count">{openTaskCount}</span>
+      )}
+      {busyGoalIds.has(goal.id) ? (
+        <span
+          className="goal-list__busy-indicator"
+          role="status"
+          aria-label="Working"
+          title="Working"
+        />
+      ) : (
+        goal.unread && (
+          <span
+            className="goal-list__unread-indicator"
+            role="status"
+            aria-label="Unread"
+            title="Unread"
+          />
+        )
+      )}
+    </Button>
+  );
+}
+
+type TaskRowProps = {
+  tasks: SidebarTask[];
+  activeTaskId: string | null;
+  onOpenTask: (task: SidebarTask) => void;
+  onContextMenu: (task: SidebarTask, x: number, y: number) => void;
+};
+
+function TaskRow({
+  index,
+  style,
+  tasks,
+  activeTaskId,
+  onOpenTask,
+  onContextMenu,
+}: RowComponentProps<TaskRowProps>) {
+  const task = tasks[index];
+
+  return (
+    <Button
+      className={`sidebar-task${task.status === 'merged' ? ' sidebar-task--merged' : ''}`}
+      type="button"
+      variant="ghost"
+      style={style}
+      aria-current={task.id === activeTaskId ? 'page' : undefined}
+      title={task.title}
+      onClick={() => {
+        if (task.status !== 'merged') {
+          onOpenTask(task);
+        }
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu(task, event.clientX, event.clientY);
+      }}
+    >
+      <TaskStatusIndicator
+        status={task.status}
+        className="sidebar-task__status"
+      />
+      <span className="sr-only">{task.status}</span>
+      <span className="sidebar-task__title">{task.title}</span>
+      <span className="sidebar-task__meta">
+        {taskStatusLabel(task.status)} · {formatRelativeTime(task.updatedAt)}
+      </span>
+    </Button>
+  );
+}
 
 export function GoalSidebar({
   goals,
@@ -88,18 +238,61 @@ export function GoalSidebar({
     }
   }, [renamingGoalId]);
 
-  function startRenaming(goal: GoalSummary) {
+  const startRenaming = useCallback((goal: GoalSummary) => {
     setRenamingGoalId(goal.id);
     setRenameValue(goal.title);
-  }
+  }, []);
 
-  function commitRename(goal: GoalSummary) {
-    const title = renameValue.trim();
-    setRenamingGoalId(null);
-    if (title && title !== goal.title) {
-      onRenameGoal(goal.id, title);
-    }
-  }
+  const commitRename = useCallback(
+    (goal: GoalSummary) => {
+      const title = renameValue.trim();
+      setRenamingGoalId(null);
+      if (title && title !== goal.title) {
+        onRenameGoal(goal.id, title);
+      }
+    },
+    [renameValue, onRenameGoal],
+  );
+
+  const goalRowProps = useMemo<GoalRowProps>(
+    () => ({
+      goals,
+      tasks,
+      activeGoalId,
+      busyGoalIds,
+      renamingGoalId,
+      renameValue,
+      renameInputRef,
+      onSelectGoal,
+      onStartRenaming: startRenaming,
+      onRenameValueChange: setRenameValue,
+      onCommitRename: commitRename,
+      onCancelRename: () => setRenamingGoalId(null),
+      onContextMenu: (goal, x, y) => setGoalContextMenu({ goal, x, y }),
+    }),
+    [
+      goals,
+      tasks,
+      activeGoalId,
+      busyGoalIds,
+      renamingGoalId,
+      renameValue,
+      onSelectGoal,
+      startRenaming,
+      commitRename,
+    ],
+  );
+
+  const taskRowProps = useMemo<TaskRowProps>(
+    () => ({
+      tasks,
+      activeTaskId,
+      onOpenTask,
+      onContextMenu: (task, x, y) => setContextMenu({ task, x, y }),
+    }),
+    [tasks, activeTaskId, onOpenTask],
+  );
+
   return (
     <aside
       className="goal-sidebar"
@@ -150,77 +343,13 @@ export function GoalSidebar({
             {goals.length === 0 ? (
               <p className="goal-list__empty">No goals yet</p>
             ) : (
-              goals.map((goal) => {
-                const openTaskCount = countOpenTasks(tasks, goal.id);
-
-                if (renamingGoalId === goal.id) {
-                  return (
-                    <div
-                      className="goal-list__item goal-list__item--editing"
-                      key={goal.id}
-                    >
-                      <input
-                        ref={renameInputRef}
-                        className="goal-list__rename-input"
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        onBlur={() => commitRename(goal)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.currentTarget.blur();
-                          } else if (event.key === 'Escape') {
-                            setRenamingGoalId(null);
-                          }
-                        }}
-                      />
-                    </div>
-                  );
-                }
-
-                return (
-                  <Button
-                    className={`goal-list__item${goal.completed ? ' goal-list__item--completed' : ''}`}
-                    type="button"
-                    variant="ghost"
-                    key={goal.id}
-                    aria-current={goal.id === activeGoalId ? 'page' : undefined}
-                    aria-busy={busyGoalIds.has(goal.id)}
-                    title={goal.title}
-                    onClick={() => onSelectGoal(goal.id)}
-                    onDoubleClick={() => startRenaming(goal)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setGoalContextMenu({
-                        goal,
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                  >
-                    <span className="goal-list__title">{goal.title}</span>
-                    {openTaskCount > 0 && (
-                      <span className="goal-list__count">{openTaskCount}</span>
-                    )}
-                    {busyGoalIds.has(goal.id) ? (
-                      <span
-                        className="goal-list__busy-indicator"
-                        role="status"
-                        aria-label="Working"
-                        title="Working"
-                      />
-                    ) : (
-                      goal.unread && (
-                        <span
-                          className="goal-list__unread-indicator"
-                          role="status"
-                          aria-label="Unread"
-                          title="Unread"
-                        />
-                      )
-                    )}
-                  </Button>
-                );
-              })
+              <List
+                className="scrollbar-hidden"
+                rowComponent={GoalRow}
+                rowCount={goals.length}
+                rowHeight={GOAL_ROW_HEIGHT}
+                rowProps={goalRowProps}
+              />
             )}
           </nav>
           <section
@@ -232,40 +361,13 @@ export function GoalSidebar({
               <p className="goal-list__empty">No queued tasks yet</p>
             ) : (
               <div className="sidebar-task-list">
-                {tasks.map((task) => (
-                  <Button
-                    className={`sidebar-task${task.status === 'merged' ? ' sidebar-task--merged' : ''}`}
-                    type="button"
-                    variant="ghost"
-                    key={task.id}
-                    aria-current={task.id === activeTaskId ? 'page' : undefined}
-                    title={task.title}
-                    onClick={() => {
-                      if (task.status !== 'merged') {
-                        onOpenTask(task);
-                      }
-                    }}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setContextMenu({
-                        task,
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                  >
-                    <TaskStatusIndicator
-                      status={task.status}
-                      className="sidebar-task__status"
-                    />
-                    <span className="sr-only">{task.status}</span>
-                    <span className="sidebar-task__title">{task.title}</span>
-                    <span className="sidebar-task__meta">
-                      {taskStatusLabel(task.status)} ·{' '}
-                      {formatRelativeTime(task.updatedAt)}
-                    </span>
-                  </Button>
-                ))}
+                <List
+                  className="scrollbar-hidden"
+                  rowComponent={TaskRow}
+                  rowCount={tasks.length}
+                  rowHeight={TASK_ROW_HEIGHT}
+                  rowProps={taskRowProps}
+                />
               </div>
             )}
           </section>

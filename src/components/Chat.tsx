@@ -67,7 +67,7 @@ export function Chat({
       </header>
 
       <section
-        className="messages"
+        className="messages scrollbar-hidden"
         aria-live="polite"
         ref={follow.ref}
         onScroll={follow.onScroll}

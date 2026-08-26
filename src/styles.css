@@ -248,21 +248,34 @@
 }
 
 .goal-list {
+  display: flex;
+  flex-direction: column;
+  flex: 2 1 0;
+  min-height: 0;
   padding: 0 8px 16px;
 }
 
 .sidebar-content {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
+}
+
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
 }
 
 .goal-list .goal-list__item {
   display: flex;
   align-items: center;
   gap: 6px;
+  box-sizing: border-box;
   width: 100%;
-  height: auto;
-  margin-bottom: 2px;
   padding: 8px;
   overflow: hidden;
   color: var(--sidebar-foreground);
@@ -285,7 +298,9 @@
 }
 
 .goal-list__item--editing {
-  margin-bottom: 2px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   padding: 8px;
 }
 
@@ -351,11 +366,16 @@
 }
 
 .sidebar-tasks {
+  display: flex;
+  flex-direction: column;
+  flex: 3 1 0;
+  min-height: 0;
   padding: 14px 8px 12px;
   border-top: 1px solid var(--sidebar-border);
 }
 
 .sidebar-tasks h2 {
+  flex: 0 0 auto;
   margin: 0 8px 8px;
   color: var(--muted-foreground);
   font-family: var(--font-heading);
@@ -366,15 +386,15 @@
 }
 
 .sidebar-task-list {
-  display: grid;
-  gap: 2px;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .sidebar-task-list .sidebar-task {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  box-sizing: border-box;
   width: 100%;
-  height: auto;
   padding: 8px;
   text-align: left;
 }

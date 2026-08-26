@@ -30,7 +30,10 @@ export function PlanningPanel({
   const artifacts = goal?.artifacts ?? [];
 
   return (
-    <aside className="planning-panel" aria-label="Goal workspace">
+    <aside
+      className="planning-panel scrollbar-hidden"
+      aria-label="Goal workspace"
+    >
       <Collapsible className="planning-section" defaultOpen>
         <CollapsibleTrigger className="planning-section__trigger">
           <span>Tasks</span>
