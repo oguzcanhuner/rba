@@ -1,4 +1,4 @@
-import { createElement, type ReactNode } from 'react';
+import { createElement, memo, type ReactNode } from 'react';
 import { highlightLine, languageForPath } from '../highlight';
 import {
   Collapsible,
@@ -190,7 +190,7 @@ function FileTreeNodes({
   );
 }
 
-export function WorkerFileTree({
+export const WorkerFileTree = memo(function WorkerFileTree({
   files,
   selected,
   onPick,
@@ -222,9 +222,9 @@ export function WorkerFileTree({
       )}
     </aside>
   );
-}
+});
 
-function DiffCodeLine({
+const DiffCodeLine = memo(function DiffCodeLine({
   line,
   language,
 }: {
@@ -248,7 +248,7 @@ function DiffCodeLine({
       <span>{highlightedNodes(highlightLine(code, language) || ' ')}</span>
     </span>
   );
-}
+});
 
 function highlightedNodes(html: string): ReactNode[] {
   type HighlightNode = {
@@ -301,7 +301,7 @@ function decodeEntities(value: string) {
     .replaceAll('&amp;', '&');
 }
 
-export function WorkerDiff({
+export const WorkerDiff = memo(function WorkerDiff({
   files,
   selected,
 }: {
@@ -360,4 +360,4 @@ export function WorkerDiff({
       )}
     </section>
   );
-}
+});

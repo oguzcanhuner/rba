@@ -1,4 +1,10 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useDefaultLayout } from 'react-resizable-panels';
 import type { SidebarTask, WorkerRun } from '../claude';
 import type { QueuedMessage } from '../hooks/useGoalStream';
@@ -67,13 +73,16 @@ export function WorkerScreen({
     }
   }, [changedFiles, selectedFile]);
 
-  function selectFile(path: string) {
-    setSelectedFile(path);
-    const index = changedFiles.findIndex((file) => file.path === path);
-    document
-      .getElementById(`worker-diff-${index}`)
-      ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  }
+  const selectFile = useCallback(
+    (path: string) => {
+      setSelectedFile(path);
+      const index = changedFiles.findIndex((file) => file.path === path);
+      document
+        .getElementById(`worker-diff-${index}`)
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    },
+    [changedFiles],
+  );
 
   if (!run) {
     return (
