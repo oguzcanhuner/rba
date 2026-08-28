@@ -84,6 +84,12 @@ test('streams text from Claude CLI JSON output', async () => {
       'mcp__rba__update_task',
       'mcp__rba__remove_task',
       'mcp__rba__commit_tasks',
+      'mcp__rba__list_workflows',
+      'mcp__rba__get_workflow',
+      'mcp__rba__register_workflow',
+      'mcp__rba__update_workflow',
+      'mcp__rba__remove_workflow',
+      'mcp__rba__validate_workflow',
     ].join(','),
   );
   const mcpConfig = JSON.parse(
