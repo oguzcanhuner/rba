@@ -13,6 +13,7 @@ import type { QueuedMessage } from './useGoalStream';
 type WorkerRunsOptions = {
   setTaskStatus: (taskId: string, status: TaskStatus) => void;
   setError: Dispatch<SetStateAction<string | null>>;
+  onTaskDeleted: (taskId: string) => void;
 };
 
 /**
@@ -20,7 +21,11 @@ type WorkerRunsOptions = {
  * including the diff of the worktree it is editing, and the follow-up
  * messages queued for background tasks the user has switched away from.
  */
-export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
+export function useWorkerRuns({
+  setTaskStatus,
+  setError,
+  onTaskDeleted,
+}: WorkerRunsOptions) {
   const [activeTask, setActiveTask] = useState<SidebarTask | null>(null);
   const [activeWorker, setActiveWorker] = useState<WorkerRun | null>(null);
   const [diff, setDiff] = useState('');
@@ -46,6 +51,18 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
   useEffect(
     () =>
       window.workers.onEvent((event) => {
+        if (event.type === 'task-deleted') {
+          clearQueue(event.taskId);
+          setActiveWorker((current) =>
+            current?.taskId === event.taskId ? null : current,
+          );
+          setActiveTask((current) =>
+            current?.id === event.taskId ? null : current,
+          );
+          onTaskDeleted(event.taskId);
+          return;
+        }
+
         if (event.type !== 'worker-updated') {
           return;
         }
@@ -92,7 +109,7 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
           }
         }
       }),
-    [setTaskStatus, setError, clearQueue],
+    [setTaskStatus, setError, clearQueue, onTaskDeleted],
   );
 
   useEffect(() => {

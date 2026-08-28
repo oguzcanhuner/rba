@@ -8,6 +8,7 @@ type TaskContextMenuOptions<T extends Task> = {
   onStartTask?: (task: T) => void;
   onCompleteTask?: (task: T) => void;
   onSelectGoal?: () => void;
+  onDeleteTask?: (task: T) => void;
 };
 
 /** Builds the status-driven right-click menu shared by the sidebar's task
@@ -19,6 +20,7 @@ export function taskContextMenuItems<T extends Task>({
   onStartTask,
   onCompleteTask,
   onSelectGoal,
+  onDeleteTask,
 }: TaskContextMenuOptions<T>): ContextMenuEntry[] {
   const items: ContextMenuEntry[] = [];
 
@@ -46,6 +48,15 @@ export function taskContextMenuItems<T extends Task>({
     items.push({
       label: 'Mark as merged',
       onSelect: () => onCompleteTask(task),
+    });
+  }
+
+  if (onDeleteTask) {
+    items.push('divider');
+    items.push({
+      label: 'Delete task',
+      variant: 'destructive',
+      onSelect: () => onDeleteTask(task),
     });
   }
 

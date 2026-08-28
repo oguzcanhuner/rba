@@ -24,12 +24,6 @@ function countOpenTasks(tasks: SidebarTask[], goalId: string) {
   ).length;
 }
 
-function hasStartedTasks(tasks: SidebarTask[], goalId: string) {
-  return tasks.some(
-    (task) => task.goalId === goalId && task.status !== 'queued',
-  );
-}
-
 type GoalSidebarProps = {
   goals: GoalSummary[];
   tasks: SidebarTask[];
@@ -49,6 +43,7 @@ type GoalSidebarProps = {
   onOpenTask: (task: SidebarTask) => void;
   onStartTask: (task: SidebarTask) => void;
   onCompleteTask: (task: SidebarTask) => void;
+  onDeleteTask: (task: SidebarTask) => void;
   onOpenSettings: () => void;
 };
 
@@ -216,6 +211,7 @@ export function GoalSidebar({
   onOpenTask,
   onStartTask,
   onCompleteTask,
+  onDeleteTask,
   onOpenSettings,
 }: GoalSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
@@ -400,6 +396,7 @@ export function GoalSidebar({
             onOpenTask,
             onStartTask,
             onCompleteTask,
+            onDeleteTask,
             onSelectGoal: () => onSelectGoal(contextMenu.task.goalId),
           })}
         />
@@ -410,7 +407,6 @@ export function GoalSidebar({
           onClose={() => setGoalContextMenu(null)}
           items={goalContextMenuItems({
             goal: goalContextMenu.goal,
-            hasStartedTasks: hasStartedTasks(tasks, goalContextMenu.goal.id),
             onRename: () => startRenaming(goalContextMenu.goal),
             onComplete: () => onCompleteGoal(goalContextMenu.goal.id),
             onReopen: () => onReopenGoal(goalContextMenu.goal.id),
