@@ -13,6 +13,7 @@ type TaskListProps<T extends Task> = {
   onOpenTask: (task: T) => void;
   onStartTask?: (task: T) => void;
   onCompleteTask?: (task: T) => void;
+  onDeleteTask?: (task: T) => void;
   showHeading?: boolean;
 };
 
@@ -24,6 +25,7 @@ export function TaskList<T extends Task>({
   onOpenTask,
   onStartTask,
   onCompleteTask,
+  onDeleteTask,
   showHeading = true,
 }: TaskListProps<T>) {
   const draftCount = tasks.filter((task) => task.status === 'draft').length;
@@ -69,7 +71,7 @@ export function TaskList<T extends Task>({
               className="task"
               key={task.id}
               onContextMenu={(event) => {
-                if (task.status === 'draft') {
+                if (task.status === 'draft' && !onDeleteTask) {
                   return;
                 }
                 event.preventDefault();
@@ -130,6 +132,7 @@ export function TaskList<T extends Task>({
             onOpenTask,
             onStartTask,
             onCompleteTask,
+            onDeleteTask,
           })}
         />
       )}

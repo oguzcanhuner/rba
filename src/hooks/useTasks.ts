@@ -33,6 +33,16 @@ export function useTasks(activeGoalId: string | null) {
     [],
   );
 
+  const remove = useCallback((taskId: string) => {
+    setById((current) => {
+      if (!(taskId in current)) {
+        return current;
+      }
+      const { [taskId]: _removed, ...rest } = current;
+      return rest;
+    });
+  }, []);
+
   const setStatus = useCallback((taskId: string, status: TaskStatus) => {
     setById((current) => {
       const task = current[taskId];
@@ -63,5 +73,12 @@ export function useTasks(activeGoalId: string | null) {
     [byId, activeGoalId],
   );
 
-  return { committed, forActiveGoal, replaceAll, replaceGoalTasks, setStatus };
+  return {
+    committed,
+    forActiveGoal,
+    replaceAll,
+    replaceGoalTasks,
+    setStatus,
+    remove,
+  };
 }

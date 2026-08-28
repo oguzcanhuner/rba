@@ -3,7 +3,6 @@ import type { ContextMenuEntry } from '../components/ui/context-menu';
 
 type GoalContextMenuOptions = {
   goal: GoalSummary;
-  hasStartedTasks: boolean;
   onRename: () => void;
   onComplete: () => void;
   onReopen: () => void;
@@ -13,7 +12,6 @@ type GoalContextMenuOptions = {
 /** Builds the right-click menu for a sidebar goal item. */
 export function goalContextMenuItems({
   goal,
-  hasStartedTasks,
   onRename,
   onComplete,
   onReopen,
@@ -29,9 +27,8 @@ export function goalContextMenuItems({
 
   items.push('divider');
   items.push({
-    label: hasStartedTasks ? 'Delete (has started tasks)' : 'Delete',
+    label: 'Delete',
     variant: 'destructive',
-    disabled: hasStartedTasks,
     onSelect: onDelete,
   });
 

@@ -251,7 +251,11 @@ export function App() {
     send: sendWorkerMessage,
     enqueue: enqueueWorkerMessage,
     removeQueued: removeQueuedWorkerMessage,
-  } = useWorkerRuns({ setTaskStatus: tasks.setStatus, setError });
+  } = useWorkerRuns({
+    setTaskStatus: tasks.setStatus,
+    setError,
+    onTaskDeleted: tasks.remove,
+  });
   const [workerDraft, setWorkerDraft] = useState('');
 
   useEffect(() => {
@@ -414,7 +418,22 @@ export function App() {
         setDraft('');
       }
     } catch {
-      setError('This goal has started tasks and cannot be deleted.');
+      setError('This goal could not be deleted.');
+    }
+  }
+
+  async function deleteTask(id: string) {
+    try {
+      const result = await window.tasks.delete(id);
+      if (!result.deleted) {
+        return;
+      }
+      tasks.remove(id);
+      if (id === activeTask?.id) {
+        closeWorker();
+      }
+    } catch {
+      setError('This task could not be deleted.');
     }
   }
 
@@ -541,6 +560,7 @@ export function App() {
           onOpenTask={openWorkerTask}
           onStartTask={startTaskInBackground}
           onCompleteTask={completeTask}
+          onDeleteTask={(task) => deleteTask(task.id)}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
       )}
@@ -588,6 +608,7 @@ export function App() {
               onOpenTask={openWorkerTask}
               onStartTask={startTaskInBackground}
               onCompleteTask={completeTask}
+              onDeleteTask={(task) => deleteTask(task.id)}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />

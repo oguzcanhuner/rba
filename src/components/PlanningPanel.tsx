@@ -15,6 +15,7 @@ type PlanningPanelProps = {
   onOpenTask: (task: SidebarTask) => void;
   onStartTask: (task: SidebarTask) => void;
   onCompleteTask: (task: SidebarTask) => void;
+  onDeleteTask: (task: SidebarTask) => void;
 };
 
 export function PlanningPanel({
@@ -26,6 +27,7 @@ export function PlanningPanel({
   onOpenTask,
   onStartTask,
   onCompleteTask,
+  onDeleteTask,
 }: PlanningPanelProps) {
   const artifacts = goal?.artifacts ?? [];
 
@@ -52,6 +54,7 @@ export function PlanningPanel({
               onOpenTask={onOpenTask}
               onStartTask={onStartTask}
               onCompleteTask={onCompleteTask}
+              onDeleteTask={onDeleteTask}
               showHeading={false}
             />
           ) : (
