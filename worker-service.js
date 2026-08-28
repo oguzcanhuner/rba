@@ -288,6 +288,47 @@ class WorkerService {
     }
   }
 
+  async getDiffBase(run) {
+    // `run.baseRevision` is the main repo's HEAD frozen at task start. If the
+    // base branch has since moved on (other commits merged into it, possibly
+    // even synced into this worker's own branch), diffing against that stale
+    // snapshot pulls in unrelated upstream changes. Diff against the
+    // merge-base with the base branch's CURRENT tip instead, so only commits
+    // unique to this worker's branch show up.
+    const options = { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 };
+    try {
+      const { stdout: commonDirOutput } = await this.runCommand(
+        'git',
+        [
+          '-C',
+          run.worktree,
+          'rev-parse',
+          '--path-format=absolute',
+          '--git-common-dir',
+        ],
+        options,
+      );
+      const repositoryRoot = path.dirname(commonDirOutput.trim());
+      const { stdout: currentHeadOutput } = await this.runCommand(
+        'git',
+        ['-C', repositoryRoot, 'rev-parse', 'HEAD'],
+        options,
+      );
+      const { stdout: mergeBaseOutput } = await this.runCommand(
+        'git',
+        ['-C', run.worktree, 'merge-base', 'HEAD', currentHeadOutput.trim()],
+        options,
+      );
+      return mergeBaseOutput.trim();
+    } catch (error) {
+      console.error(
+        `Failed to compute a live diff base for ${run.taskId}.`,
+        error,
+      );
+      return run.baseRevision;
+    }
+  }
+
   async getDiff(taskId) {
     const run = this.store.getWorkerRun(taskId);
     if (!run) {
@@ -297,6 +338,7 @@ class WorkerService {
       return { patch: '' };
     }
 
+    const diffBase = await this.getDiffBase(run);
     const options = { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 };
     const { stdout } = await this.runCommand(
       'git',
@@ -310,7 +352,7 @@ class WorkerService {
         '--find-renames',
         '--unified=3',
         '--no-color',
-        run.baseRevision,
+        diffBase,
         '--',
       ],
       options,
@@ -357,13 +399,17 @@ class WorkerService {
       throw new Error('This worker is not running.');
     }
     runtime.stream?.cancel();
-    return this.finalize(runtime, 'stopped');
+    const existingSessionId =
+      this.store.getWorkerRun(taskId)?.sessionId ?? null;
+    return this.finalize(runtime, 'stopped', existingSessionId);
   }
 
   shutdown() {
     for (const runtime of this.running.values()) {
       runtime.stream?.cancel();
-      this.finalize(runtime, 'stopped');
+      const existingSessionId =
+        this.store.getWorkerRun(runtime.taskId)?.sessionId ?? null;
+      this.finalize(runtime, 'stopped', existingSessionId);
     }
     this.disposed = true;
   }
