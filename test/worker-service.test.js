@@ -181,6 +181,12 @@ test('returns tracked and untracked worker changes from the base revision', asyn
       if (args.includes('--show-toplevel')) {
         return { stdout: '/repo\n' };
       }
+      if (args.includes('--git-common-dir')) {
+        return { stdout: '/repo/.git\n' };
+      }
+      if (args.includes('merge-base')) {
+        return { stdout: 'abc123\n' };
+      }
       if (args.at(-1) === 'HEAD') {
         return { stdout: 'abc123\n' };
       }
