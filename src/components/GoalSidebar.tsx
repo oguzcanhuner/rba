@@ -1,3 +1,4 @@
+import { Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type RowComponentProps } from 'react-window';
 import plusIcon from '../assets/plus.svg';
@@ -45,6 +46,7 @@ type GoalSidebarProps = {
   onCompleteTask: (task: SidebarTask) => void;
   onDeleteTask: (task: SidebarTask) => void;
   onOpenSettings: () => void;
+  onOpenWorkflows: () => void;
 };
 
 type GoalRowProps = {
@@ -213,6 +215,7 @@ export function GoalSidebar({
   onCompleteTask,
   onDeleteTask,
   onOpenSettings,
+  onOpenWorkflows,
 }: GoalSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
     task: SidebarTask;
@@ -370,6 +373,16 @@ export function GoalSidebar({
         </div>
       )}
       <div className="goal-sidebar__footer">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Workflows"
+          title="Workflows"
+          onClick={onOpenWorkflows}
+        >
+          <Workflow aria-hidden="true" />
+        </Button>
         <Button
           type="button"
           variant="ghost"
