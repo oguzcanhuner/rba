@@ -1,6 +1,7 @@
 const { execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
-const { mkdir } = require('node:fs/promises');
+const { mkdir, readdir, stat } = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const { beginWorkerCli } = require('./claude-cli-service');
@@ -44,6 +45,9 @@ class WorkerService {
     beginWorker = beginWorkerCli,
     runCommand = execFileAsync,
     makeDirectory = mkdir,
+    claudeProjectsDirectory = path.join(os.homedir(), '.claude', 'projects'),
+    readDirectory = readdir,
+    statPath = stat,
   }) {
     this.store = store;
     this.worktreesDirectory = worktreesDirectory;
@@ -51,8 +55,56 @@ class WorkerService {
     this.beginWorker = beginWorker;
     this.runCommand = runCommand;
     this.makeDirectory = makeDirectory;
+    this.claudeProjectsDirectory = claudeProjectsDirectory;
+    this.readDirectory = readDirectory;
+    this.statPath = statPath;
     this.running = new Map();
     this.disposed = false;
+  }
+
+  /** Older runs (and any run interrupted before this app learned to persist
+   * the session id early) have no session id, which leaves their chat
+   * permanently read-only. The CLI names its transcript files after the
+   * session, so recover the newest one for each worktree. */
+  async recoverMissingSessions() {
+    for (const {
+      taskId,
+      worktree,
+    } of this.store.listWorkerRunsMissingSession()) {
+      const sessionId = await this.findSessionId(worktree);
+      if (sessionId) {
+        this.store.saveWorkerSessionId(taskId, sessionId);
+        this.broadcast(taskId);
+      }
+    }
+  }
+
+  async findSessionId(worktree) {
+    const directory = path.join(
+      this.claudeProjectsDirectory,
+      worktree.replace(/[^a-zA-Z0-9]/g, '-'),
+    );
+    let entries;
+    try {
+      entries = await this.readDirectory(directory);
+    } catch {
+      return null;
+    }
+    const transcripts = [];
+    for (const entry of entries.filter((name) => name.endsWith('.jsonl'))) {
+      try {
+        const { mtimeMs } = await this.statPath(path.join(directory, entry));
+        transcripts.push({
+          sessionId: entry.slice(0, -'.jsonl'.length),
+          mtimeMs,
+        });
+      } catch {
+        // A transcript that vanished mid-scan simply cannot be recovered.
+      }
+    }
+    return (
+      transcripts.sort((a, b) => b.mtimeMs - a.mtimeMs).at(0)?.sessionId ?? null
+    );
   }
 
   async start(taskId) {
@@ -179,6 +231,9 @@ class WorkerService {
         sessionId,
         cwd: worktree,
         model,
+        onSessionId: (id) => {
+          this.store.saveWorkerSessionId(runtime.taskId, id);
+        },
         onText: (text) => {
           runtime.message = {
             ...runtime.message,

@@ -929,6 +929,7 @@ app.whenReady().then(() => {
     store: goalStore,
     onUpdate: broadcastWorkflow,
   });
+  void workerService.recoverMissingSessions();
   createWindow();
 
   app.on('activate', () => {
