@@ -46,6 +46,9 @@ export function useWorkerRuns({ setTaskStatus, setError }: WorkerRunsOptions) {
   useEffect(
     () =>
       window.workers.onEvent((event) => {
+        if (event.type !== 'worker-updated') {
+          return;
+        }
         const { run } = event;
         setTaskStatus(run.taskId, run.status);
         setActiveWorker((current) =>

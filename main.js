@@ -1,10 +1,14 @@
 const { app, BrowserWindow, dialog, ipcMain, protocol } = require('electron');
+const { execFile } = require('node:child_process');
 const { realpath, stat } = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { promisify } = require('node:util');
 const { beginClaudeCli } = require('./claude-cli-service');
 const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
+
+const execFileAsync = promisify(execFile);
 
 const activeRequests = new Map();
 let goalStore;
@@ -53,6 +57,17 @@ function broadcastWorker(run) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) {
       window.webContents.send('workers:event', { type: 'worker-updated', run });
+    }
+  }
+}
+
+function broadcastTaskDeleted(taskId) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send('workers:event', {
+        type: 'task-deleted',
+        taskId,
+      });
     }
   }
 }
@@ -496,7 +511,7 @@ ipcMain.handle('goals:reopen', (event, goalId) => {
   goalStore.reopenGoal(goalId);
 });
 
-ipcMain.handle('goals:delete', (event, goalId) => {
+ipcMain.handle('goals:delete', async (event, goalId) => {
   if (
     !isTrustedSender(event.senderFrame) ||
     typeof goalId !== 'string' ||
@@ -506,7 +521,32 @@ ipcMain.handle('goals:delete', (event, goalId) => {
     throw new Error('Invalid goal request.');
   }
 
-  goalStore.deleteGoal(goalId);
+  const goal = goalStore.get(goalId);
+  if (!goal) {
+    throw new Error('This goal no longer exists.');
+  }
+
+  const startedTasks = goal.tasks.some(
+    (task) => !['draft', 'queued'].includes(task.status),
+  );
+
+  if (startedTasks) {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'warning',
+      buttons: ['Cancel', 'Delete task'],
+      cancelId: 0,
+      defaultId: 0,
+      message: goal.title,
+      detail:
+        'Deletes worktrees and branches for its started tasks. This cannot be undone.',
+    });
+    if (response === 0) {
+      return;
+    }
+  }
+
+  await workerService.deleteGoal(goalId);
 });
 
 ipcMain.handle('goals:commit-tasks', (event, goalId) => {
@@ -528,6 +568,56 @@ ipcMain.handle('tasks:list', (event) => {
   }
 
   return goalStore.listCommittedTasks();
+});
+
+ipcMain.handle('tasks:delete', async (event, taskId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof taskId !== 'string' ||
+    taskId.length === 0 ||
+    taskId.length > 100
+  ) {
+    throw new Error('Invalid task request.');
+  }
+
+  const run = goalStore.getWorkerRun(taskId);
+  const task = goalStore.getTaskForWorker(taskId);
+  if (!task) {
+    throw new Error('This task no longer exists.');
+  }
+
+  let detail = 'This cannot be undone.';
+  if (run?.worktree) {
+    detail = `Deletes branch ${run.branch} and its worktree. This cannot be undone.`;
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['-C', run.worktree, 'status', '--porcelain'],
+        { encoding: 'utf8' },
+      );
+      const changedFiles = stdout.split('\n').filter(Boolean).length;
+      detail = `Deletes branch ${run.branch} and its worktree, including ${changedFiles} uncommitted files. This cannot be undone.`;
+    } catch {
+      // Fall back to the generic wording above.
+    }
+  }
+
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['Cancel', 'Delete task'],
+    cancelId: 0,
+    defaultId: 0,
+    message: task.title,
+    detail,
+  });
+  if (response === 0) {
+    return { deleted: false };
+  }
+
+  await workerService.deleteTask(taskId);
+  broadcastTaskDeleted(taskId);
+  return { deleted: true };
 });
 
 ipcMain.handle('workers:get', (event, taskId) => {

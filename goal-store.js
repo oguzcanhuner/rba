@@ -869,25 +869,49 @@ class GoalStore {
     }
   }
 
-  /** Deletes a goal outright, allowed only while every task is still in a
-   * pre-start state, since a started task's worktree and branch would
-   * otherwise be orphaned by the cascade. */
+  /** Deletes a goal outright. The caller is responsible for tearing down any
+   * worktrees and branches belonging to the goal's started tasks before
+   * calling this, since the cascade only removes database rows. */
   deleteGoal(goalId) {
-    const startedTask = this.database
-      .prepare(`
-        SELECT 1 FROM tasks
-        WHERE goal_id = ? AND status NOT IN ('draft', 'queued')
-        LIMIT 1
-      `)
-      .get(goalId);
-    if (startedTask) {
-      throw new Error('This goal has started tasks and cannot be deleted.');
-    }
     const result = this.database
       .prepare('DELETE FROM goals WHERE id = ?')
       .run(goalId);
     if (result.changes === 0) {
       throw new Error('This goal no longer exists.');
+    }
+  }
+
+  listWorkerRunsForGoal(goalId) {
+    return this.database
+      .prepare(`
+        SELECT w.task_id AS taskId, w.branch, w.worktree
+        FROM worker_runs w
+        JOIN tasks t ON t.id = w.task_id
+        WHERE t.goal_id = ?
+      `)
+      .all(goalId)
+      .map((row) => ({ ...row }));
+  }
+
+  deleteTask(taskId) {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const task = this.database
+        .prepare('SELECT goal_id AS goalId FROM tasks WHERE id = ?')
+        .get(taskId);
+      const result = this.database
+        .prepare('DELETE FROM tasks WHERE id = ?')
+        .run(taskId);
+      if (result.changes === 0) {
+        throw new Error('This task no longer exists.');
+      }
+      this.database
+        .prepare('UPDATE goals SET updated_at = ? WHERE id = ?')
+        .run(new Date().toISOString(), task.goalId);
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
     }
   }
 

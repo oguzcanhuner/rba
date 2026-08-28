@@ -288,6 +288,87 @@ class WorkerService {
     }
   }
 
+  async removeBranch(repositoryRoot, branch) {
+    try {
+      await this.runCommand(
+        'git',
+        ['-C', repositoryRoot, 'branch', '-D', branch],
+        { encoding: 'utf8' },
+      );
+    } catch (error) {
+      console.error(`Failed to remove branch ${branch}.`, error);
+    }
+  }
+
+  async deleteTask(taskId) {
+    const task = this.store.getTaskForWorker(taskId);
+    const run = this.store.getWorkerRun(taskId);
+
+    if (this.running.has(taskId)) {
+      try {
+        this.stop(taskId);
+      } catch {
+        // Already finalized between the check and the call.
+      }
+    }
+
+    if (task && run?.worktree) {
+      try {
+        const { stdout: rootOutput } = await this.runCommand(
+          'git',
+          ['-C', task.workingDirectory, 'rev-parse', '--show-toplevel'],
+          { encoding: 'utf8' },
+        );
+        const repositoryRoot = rootOutput.trim();
+        await this.removeWorktree(repositoryRoot, run.worktree);
+        await this.removeBranch(repositoryRoot, run.branch);
+      } catch (error) {
+        console.error(
+          `Failed to determine the repository root for task ${taskId}.`,
+          error,
+        );
+      }
+    }
+
+    this.store.deleteTask(taskId);
+  }
+
+  async deleteGoal(goalId) {
+    const runs = this.store.listWorkerRunsForGoal(goalId);
+
+    for (const run of runs) {
+      if (this.running.has(run.taskId)) {
+        try {
+          this.stop(run.taskId);
+        } catch {
+          // Already finalized between the check and the call.
+        }
+      }
+
+      const task = this.store.getTaskForWorker(run.taskId);
+      if (!task) {
+        continue;
+      }
+      try {
+        const { stdout: rootOutput } = await this.runCommand(
+          'git',
+          ['-C', task.workingDirectory, 'rev-parse', '--show-toplevel'],
+          { encoding: 'utf8' },
+        );
+        const repositoryRoot = rootOutput.trim();
+        await this.removeWorktree(repositoryRoot, run.worktree);
+        await this.removeBranch(repositoryRoot, run.branch);
+      } catch (error) {
+        console.error(
+          `Failed to determine the repository root for task ${run.taskId}.`,
+          error,
+        );
+      }
+    }
+
+    this.store.deleteGoal(goalId);
+  }
+
   async getDiffBase(run) {
     // `run.baseRevision` is the main repo's HEAD frozen at task start. If the
     // base branch has since moved on (other commits merged into it, possibly
