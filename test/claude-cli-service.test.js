@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { test } = require('node:test');
+const { setImmediate: waitForImmediate } = require('node:timers/promises');
 const { beginClaudeCli, beginWorkerCli } = require('../claude-cli-service');
 
 function fakeProcess() {
@@ -262,4 +263,28 @@ test('starts an autonomous worker with write and command tools', async () => {
   assert.deepEqual(await response.completion, {
     sessionId: 'worker-session',
   });
+});
+
+test('reports the session id from the first message', async () => {
+  const sessions = [];
+  const child = fakeProcess();
+  beginWorkerCli({
+    prompt: 'Do it.',
+    cwd: '/repo',
+    onText: () => {},
+    onSessionId: (id) => sessions.push(id),
+    spawnProcess: () => child,
+  });
+
+  child.stdout.write(
+    `${JSON.stringify({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'session-9',
+    })}\n`,
+  );
+
+  await waitForImmediate();
+
+  assert.deepEqual(sessions, ['session-9']);
 });

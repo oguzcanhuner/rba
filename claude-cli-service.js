@@ -37,6 +37,7 @@ function beginClaudeProcess({
   onToolStart = () => {},
   onToolInput = () => {},
   onToolResult = () => {},
+  onSessionId = () => {},
   spawnProcess = spawn,
   environment = process.env,
 }) {
@@ -74,6 +75,7 @@ function beginClaudeProcess({
   let stderr = '';
   let result;
   let protocolError;
+  let reportedSessionId;
   const toolBlocks = new Map();
 
   function handleLine(line) {
@@ -155,6 +157,14 @@ function beginClaudeProcess({
           });
         }
       }
+    }
+
+    // The CLI reports the session id on its first message, well before the
+    // run finishes. Surfacing it immediately lets a run that never reaches a
+    // result message (an app quit mid-run) still be resumed later.
+    if (message.session_id && !reportedSessionId) {
+      reportedSessionId = message.session_id;
+      onSessionId(message.session_id);
     }
 
     if (message.type === 'result') {

@@ -655,6 +655,28 @@ class GoalStore {
     }
   }
 
+  /** Runs that never recorded a session id, so their chat cannot be resumed
+   * until one is recovered from the CLI's own session files. */
+  listWorkerRunsMissingSession() {
+    return this.database
+      .prepare(`
+        SELECT task_id AS taskId, worktree
+        FROM worker_runs
+        WHERE session_id IS NULL AND status <> 'working'
+      `)
+      .all();
+  }
+
+  /** Records the CLI session id mid-run so an interrupted worker can still be
+   * resumed from chat. */
+  saveWorkerSessionId(taskId, sessionId) {
+    this.database
+      .prepare(
+        'UPDATE worker_runs SET session_id = ? WHERE task_id = ? AND session_id IS NULL',
+      )
+      .run(sessionId, taskId);
+  }
+
   updateWorkerRun(taskId, { status, sessionId = null, error = null }) {
     const now = new Date().toISOString();
     const finishedAt = status === 'working' ? null : now;

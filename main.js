@@ -766,6 +766,7 @@ app.whenReady().then(() => {
     worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
     onUpdate: broadcastWorker,
   });
+  void workerService.recoverMissingSessions();
   createWindow();
 
   app.on('activate', () => {

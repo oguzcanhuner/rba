@@ -440,3 +440,64 @@ test('deletes a goal by cleaning up every run first', async () => {
   );
   store.close();
 });
+
+test('keeps an interrupted worker resumable by persisting the session id early', async () => {
+  const store = storeWithQueuedTask();
+  let callbacks;
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (_command, args) => ({
+      stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+    }),
+    beginWorker: (options) => {
+      callbacks = options;
+      return { cancel: () => {}, completion: new Promise(() => {}) };
+    },
+  });
+
+  await service.start('task-1');
+  callbacks.onSessionId('session-1');
+  assert.equal(store.getWorkerRun('task-1').sessionId, 'session-1');
+
+  // Simulate RBA quitting mid-run and starting again.
+  service.running.clear();
+  store.interruptWorkingRuns();
+  const interrupted = store.getWorkerRun('task-1');
+  assert.equal(interrupted.status, 'failed');
+  assert.equal(interrupted.sessionId, 'session-1');
+
+  await service.send('task-1', 'carry on');
+  assert.equal(callbacks.sessionId, 'session-1');
+  store.close();
+});
+
+test('recovers missing session ids from the CLI transcripts', async () => {
+  const store = storeWithQueuedTask();
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worker-root/task-1',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.updateWorkerRun('task-1', { status: 'failed', error: 'interrupted' });
+
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    claudeProjectsDirectory: '/projects',
+    readDirectory: async (directory) => {
+      assert.equal(directory, '/projects/-worker-root-task-1');
+      return ['old-session.jsonl', 'new-session.jsonl', 'notes.txt'];
+    },
+    statPath: async (file) => ({
+      mtimeMs: file.includes('new-session') ? 200 : 100,
+    }),
+  });
+
+  await service.recoverMissingSessions();
+
+  assert.equal(store.getWorkerRun('task-1').sessionId, 'new-session');
+  store.close();
+});
