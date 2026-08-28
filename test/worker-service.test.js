@@ -299,3 +299,144 @@ test('ignores worktree removal failures when completing a task', async () => {
   assert.equal(store.getTaskForWorker('task-1').status, 'merged');
   store.close();
 });
+
+test('deletes a task with a run by removing the worktree, then the branch', async () => {
+  const store = storeWithQueuedTask();
+  const commands = [];
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (command, args) => {
+      commands.push({ command, args });
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise(() => {}),
+    }),
+  });
+
+  await service.start('task-1');
+  await service.deleteTask('task-1');
+
+  const gitCommands = commands.filter(
+    ({ args }) => args.includes('remove') || args.includes('-D'),
+  );
+  assert.deepEqual(
+    gitCommands.map(({ args }) => args.slice(2)),
+    [
+      ['worktree', 'remove', '/worker-root/task-1', '--force'],
+      ['branch', '-D', 'rba/task-1'],
+    ],
+  );
+  assert.equal(store.getTaskForWorker('task-1'), null);
+  store.close();
+});
+
+test('deletes a task with no run without touching git', async () => {
+  const store = storeWithQueuedTask();
+  let called = false;
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async () => {
+      called = true;
+      return { stdout: '' };
+    },
+    beginWorker: () => {
+      throw new Error('should not be called');
+    },
+  });
+
+  await service.deleteTask('task-1');
+
+  assert.equal(called, false);
+  assert.equal(store.getTaskForWorker('task-1'), null);
+  store.close();
+});
+
+test('deletes a task even when removing the worktree fails', async () => {
+  const store = storeWithQueuedTask();
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (_command, args) => {
+      if (args.includes('remove')) {
+        throw new Error('worktree has uncommitted changes');
+      }
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise(() => {}),
+    }),
+  });
+
+  await service.start('task-1');
+  await assert.doesNotReject(() => service.deleteTask('task-1'));
+  assert.equal(store.getTaskForWorker('task-1'), null);
+  store.close();
+});
+
+test('deletes a goal by cleaning up every run first', async () => {
+  const store = storeWithQueuedTask();
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, 2, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-2',
+      'goal-1',
+      'Implement the second worker',
+      'Add another minimal worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  const commands = [];
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (command, args) => {
+      commands.push({ command, args });
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise(() => {}),
+    }),
+  });
+
+  await service.start('task-1');
+  await service.start('task-2');
+
+  await service.deleteGoal('goal-1');
+
+  const removedWorktrees = commands
+    .filter(({ args }) => args.includes('remove'))
+    .map(({ args }) => args.at(-2));
+  const removedBranches = commands
+    .filter(({ args }) => args.includes('-D'))
+    .map(({ args }) => args.at(-1));
+  assert.deepEqual(
+    new Set(removedWorktrees),
+    new Set(['/worker-root/task-1', '/worker-root/task-2']),
+  );
+  assert.deepEqual(
+    new Set(removedBranches),
+    new Set(['rba/task-1', 'rba/task-2']),
+  );
+  store.close();
+});

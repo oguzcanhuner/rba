@@ -148,7 +148,9 @@ export type Settings = {
   workerModel: string;
 };
 
-export type WorkerEvent = { type: 'worker-updated'; run: WorkerRun };
+export type WorkerEvent =
+  | { type: 'worker-updated'; run: WorkerRun }
+  | { type: 'task-deleted'; taskId: string };
 
 declare global {
   interface Window {
@@ -173,6 +175,7 @@ declare global {
     };
     tasks: {
       list(): Promise<SidebarTask[]>;
+      delete(taskId: string): Promise<{ deleted: boolean }>;
     };
     settings: {
       get(): Promise<Settings>;

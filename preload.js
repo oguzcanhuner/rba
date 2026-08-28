@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('goals', {
 
 contextBridge.exposeInMainWorld('tasks', {
   list: () => ipcRenderer.invoke('tasks:list'),
+  delete: (taskId) => ipcRenderer.invoke('tasks:delete', taskId),
 });
 
 contextBridge.exposeInMainWorld('settings', {

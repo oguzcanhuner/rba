@@ -163,7 +163,7 @@ test('deletes a goal only when it has no started tasks', () => {
   store.close();
 });
 
-test('refuses to delete a goal with a started task', () => {
+test('deletes a goal even when it has a started task', () => {
   const store = new GoalStore(':memory:');
   const saved = goal();
   store.save(saved);
@@ -183,8 +183,8 @@ test('refuses to delete a goal with a started task', () => {
       saved.createdAt,
     );
 
-  assert.throws(() => store.deleteGoal(saved.id));
-  assert.notEqual(store.get(saved.id), null);
+  store.deleteGoal(saved.id);
+  assert.equal(store.get(saved.id), null);
   store.close();
 });
 
@@ -479,6 +479,120 @@ test('marks a task as merged without touching its worker run', () => {
   assert.equal(store.get('goal-1').tasks[0].status, 'merged');
   assert.equal(store.getWorkerRun('task-1').status, 'completed');
   assert.throws(() => store.completeTask('task-1'), /merged/);
+  store.close();
+});
+
+test('deletes a working task and its worker run rows', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-1',
+      'goal-1',
+      1,
+      'Implement workers',
+      'Build the worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.saveWorkerMessage('task-1', {
+    id: 'worker-task-1',
+    role: 'assistant',
+    status: 'streaming',
+    parts: [{ type: 'text', id: 'part-1', text: 'Working.' }],
+  });
+
+  store.deleteTask('task-1');
+
+  assert.equal(
+    store.database.prepare('SELECT 1 FROM tasks WHERE id = ?').get('task-1'),
+    undefined,
+  );
+  assert.equal(
+    store.database
+      .prepare('SELECT 1 FROM worker_runs WHERE task_id = ?')
+      .get('task-1'),
+    undefined,
+  );
+  assert.equal(
+    store.database
+      .prepare('SELECT 1 FROM worker_messages WHERE task_id = ?')
+      .get('task-1'),
+    undefined,
+  );
+  store.close();
+});
+
+test('throws when deleting a missing task', () => {
+  const store = new GoalStore(':memory:');
+  assert.throws(() => store.deleteTask('missing'), /no longer exists/);
+  store.close();
+});
+
+test('scopes listWorkerRunsForGoal to the goal', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  store.save(goal({ id: 'goal-2' }));
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-1',
+      'goal-1',
+      1,
+      'Implement workers',
+      'Build the worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-2',
+      'goal-2',
+      1,
+      'Implement other',
+      'Build the other.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.createWorkerRun('task-2', {
+    branch: 'rba/task-2',
+    worktree: '/worktrees/task-2',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+
+  assert.deepEqual(store.listWorkerRunsForGoal('goal-1'), [
+    { taskId: 'task-1', branch: 'rba/task-1', worktree: '/worktrees/task-1' },
+  ]);
   store.close();
 });
 
