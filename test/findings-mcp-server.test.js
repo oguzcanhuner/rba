@@ -121,12 +121,18 @@ test('serves artifact and task tools over MCP stdio', async (t) => {
     'add_task',
     'commit_tasks',
     'create_artifact',
+    'get_workflow',
     'list_artifacts',
+    'list_workflows',
     'read_tasks',
+    'register_workflow',
     'remove_artifact',
     'remove_task',
+    'remove_workflow',
     'update_artifact',
     'update_task',
+    'update_workflow',
+    'validate_workflow',
   ]);
   assert.equal(
     (await client.callTool({ name: 'list_artifacts' })).content[0].text,
@@ -156,4 +162,200 @@ test('serves artifact and task tools over MCP stdio', async (t) => {
     },
   });
   assert.equal(store.get('goal-1').tasks[0].status, 'draft');
+});
+
+function workflowDefinition() {
+  return {
+    start: 'build',
+    steps: {
+      build: { run: 'npm run build', onPass: 'done', onFail: 'done' },
+      done: { type: 'terminal' },
+    },
+  };
+}
+
+test('register_workflow then get_workflow round-trips a definition', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workflow-mcp-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, '..', 'findings-mcp-server.js')],
+    env: { RBA_GOAL_DATABASE: filename, RBA_GOAL_ID: 'goal-1' },
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'rba-test', version: '1.0.0' });
+  await client.connect(transport);
+  t.after(async () => {
+    await client.close();
+    store.close();
+  });
+
+  const registerResult = await client.callTool({
+    name: 'register_workflow',
+    arguments: { name: 'ship-task', definition: workflowDefinition() },
+  });
+  assert.equal(registerResult.isError, undefined);
+  assert.match(
+    registerResult.content[0].text,
+    /Registered ship-task \(2 steps\)/,
+  );
+  assert.match(registerResult.content[0].text, /Terminal step: done/);
+
+  const getResult = await client.callTool({
+    name: 'get_workflow',
+    arguments: { name: 'ship-task' },
+  });
+  const workflow = JSON.parse(getResult.content[0].text);
+  assert.deepEqual(workflow.definition, workflowDefinition());
+
+  const listResult = await client.callTool({ name: 'list_workflows' });
+  const list = JSON.parse(listResult.content[0].text);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].stepCount, 2);
+});
+
+test('register_workflow rejects an invalid definition and stores nothing', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workflow-mcp-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, '..', 'findings-mcp-server.js')],
+    env: { RBA_GOAL_DATABASE: filename, RBA_GOAL_ID: 'goal-1' },
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'rba-test', version: '1.0.0' });
+  await client.connect(transport);
+  t.after(async () => {
+    await client.close();
+    store.close();
+  });
+
+  const badDefinition = {
+    start: 'build',
+    steps: { build: { run: 'npm run build', onFail: 'fixx' } },
+  };
+  const result = await client.callTool({
+    name: 'register_workflow',
+    arguments: { name: 'ship-task', definition: badDefinition },
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /fixx/);
+
+  const listResult = await client.callTool({ name: 'list_workflows' });
+  assert.equal(listResult.content[0].text, '(there are no workflows yet)');
+});
+
+test('register_workflow rejects duplicate names', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workflow-mcp-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, '..', 'findings-mcp-server.js')],
+    env: { RBA_GOAL_DATABASE: filename, RBA_GOAL_ID: 'goal-1' },
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'rba-test', version: '1.0.0' });
+  await client.connect(transport);
+  t.after(async () => {
+    await client.close();
+    store.close();
+  });
+
+  await client.callTool({
+    name: 'register_workflow',
+    arguments: { name: 'ship-task', definition: workflowDefinition() },
+  });
+  const result = await client.callTool({
+    name: 'register_workflow',
+    arguments: { name: 'ship-task', definition: workflowDefinition() },
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /update_workflow/);
+});
+
+test('update_workflow revalidates the definition', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workflow-mcp-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, '..', 'findings-mcp-server.js')],
+    env: { RBA_GOAL_DATABASE: filename, RBA_GOAL_ID: 'goal-1' },
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'rba-test', version: '1.0.0' });
+  await client.connect(transport);
+  t.after(async () => {
+    await client.close();
+    store.close();
+  });
+
+  await client.callTool({
+    name: 'register_workflow',
+    arguments: { name: 'ship-task', definition: workflowDefinition() },
+  });
+
+  const badUpdate = await client.callTool({
+    name: 'update_workflow',
+    arguments: {
+      name: 'ship-task',
+      definition: {
+        start: 'build',
+        steps: { build: { run: 'npm run build', onFail: 'fixx' } },
+      },
+    },
+  });
+  assert.equal(badUpdate.isError, true);
+  assert.match(badUpdate.content[0].text, /fixx/);
+
+  const goodUpdate = await client.callTool({
+    name: 'update_workflow',
+    arguments: { name: 'ship-task', description: 'Ships a task.' },
+  });
+  assert.equal(goodUpdate.isError, undefined);
+  const workflow = JSON.parse(
+    (
+      await client.callTool({
+        name: 'get_workflow',
+        arguments: { name: 'ship-task' },
+      })
+    ).content[0].text,
+  );
+  assert.equal(workflow.description, 'Ships a task.');
+  assert.deepEqual(workflow.definition, workflowDefinition());
+});
+
+test('validate_workflow stores nothing', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workflow-mcp-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, '..', 'findings-mcp-server.js')],
+    env: { RBA_GOAL_DATABASE: filename, RBA_GOAL_ID: 'goal-1' },
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'rba-test', version: '1.0.0' });
+  await client.connect(transport);
+  t.after(async () => {
+    await client.close();
+    store.close();
+  });
+
+  const result = await client.callTool({
+    name: 'validate_workflow',
+    arguments: { definition: workflowDefinition() },
+  });
+  assert.equal(result.isError, undefined);
+
+  const listResult = await client.callTool({ name: 'list_workflows' });
+  assert.equal(listResult.content[0].text, '(there are no workflows yet)');
 });

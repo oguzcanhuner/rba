@@ -6,6 +6,11 @@ const {
   StdioServerTransport,
 } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
+const {
+  validateWorkflowName,
+  validateDefinition,
+  normaliseDefinition,
+} = require('./workflow-spec');
 
 const MAX_ARTIFACT_TITLE_LENGTH = 200;
 const MAX_ARTIFACT_HTML_LENGTH = 1_000_000;
@@ -374,9 +379,208 @@ class TasksRepository {
   }
 }
 
+const MAX_WORKFLOW_DEFINITION_LENGTH = 100_000;
+const MAX_WORKFLOW_DESCRIPTION_LENGTH = 2000;
+const MAX_WORKFLOW_DIRECTORY_LENGTH = 4096;
+
+/** Workflows are global to the user rather than scoped to a goal, so this
+ * repository (unlike the ones above) ignores RBA_GOAL_ID entirely. */
+class WorkflowsRepository {
+  constructor(filename) {
+    if (!path.isAbsolute(filename)) {
+      throw new Error('The goal database path must be absolute.');
+    }
+    this.database = new DatabaseSync(filename);
+    this.database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
+    `);
+  }
+
+  list() {
+    return this.database
+      .prepare(`
+        SELECT
+          w.id, w.name, w.description, w.directory,
+          w.definition_json AS definitionJson,
+          w.created_at AS createdAt, w.updated_at AS updatedAt,
+          r.status AS latestRunStatus, r.started_at AS latestRunStartedAt
+        FROM workflows w
+        LEFT JOIN workflow_runs r ON r.id = (
+          SELECT id FROM workflow_runs
+          WHERE workflow_id = w.id
+          ORDER BY started_at DESC
+          LIMIT 1
+        )
+        ORDER BY w.name
+      `)
+      .all()
+      .map(({ definitionJson, ...row }) => {
+        const definition = JSON.parse(definitionJson);
+        return {
+          name: row.name,
+          description: row.description,
+          directory: row.directory,
+          stepCount: Object.keys(definition.steps ?? {}).length,
+          latestRunStatus: row.latestRunStatus,
+          latestRunStartedAt: row.latestRunStartedAt,
+        };
+      });
+  }
+
+  getByName(name) {
+    const row = this.database
+      .prepare(`
+        SELECT id, name, description, directory,
+               definition_json AS definitionJson,
+               created_at AS createdAt, updated_at AS updatedAt
+        FROM workflows WHERE name = ?
+      `)
+      .get(name);
+    if (!row) return null;
+    const { definitionJson, ...rest } = row;
+    return { ...rest, definition: JSON.parse(definitionJson) };
+  }
+
+  register({ name, description, directory, definition }) {
+    this.validateName(name);
+    this.validateDescription(description);
+    this.validateDirectory(directory);
+    const normalisedDefinition = normaliseDefinition(definition);
+    this.validateDefinitionSize(normalisedDefinition);
+    const validation = validateDefinition(normalisedDefinition);
+    if (!validation.ok) {
+      const error = new Error(validation.errors.join(' '));
+      error.isValidationError = true;
+      throw error;
+    }
+
+    if (this.getByName(name)) {
+      throw new Error(
+        `A workflow named \`${name}\` already exists; use update_workflow.`,
+      );
+    }
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.database
+      .prepare(`
+        INSERT INTO workflows (
+          id, name, description, directory, definition_json,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        id,
+        name,
+        description ?? null,
+        directory ?? null,
+        JSON.stringify(normalisedDefinition),
+        now,
+        now,
+      );
+    return {
+      ...this.getByName(name),
+      stepCount: Object.keys(normalisedDefinition.steps).length,
+    };
+  }
+
+  update(name, { description, directory, definition }) {
+    const workflow = this.getByName(name);
+    if (!workflow) {
+      return null;
+    }
+
+    let normalisedDefinition = workflow.definition;
+    if (definition !== undefined) {
+      normalisedDefinition = normaliseDefinition(definition);
+      this.validateDefinitionSize(normalisedDefinition);
+      const validation = validateDefinition(normalisedDefinition);
+      if (!validation.ok) {
+        const error = new Error(validation.errors.join(' '));
+        error.isValidationError = true;
+        throw error;
+      }
+    }
+    if (description !== undefined) this.validateDescription(description);
+    if (directory !== undefined) this.validateDirectory(directory);
+
+    const now = new Date().toISOString();
+    this.database
+      .prepare(`
+        UPDATE workflows
+        SET description = ?, directory = ?, definition_json = ?, updated_at = ?
+        WHERE name = ?
+      `)
+      .run(
+        description !== undefined ? description : workflow.description,
+        directory !== undefined ? directory : workflow.directory,
+        JSON.stringify(normalisedDefinition),
+        now,
+        name,
+      );
+    const updated = this.getByName(name);
+    return {
+      ...updated,
+      stepCount: Object.keys(updated.definition.steps).length,
+    };
+  }
+
+  remove(name) {
+    const result = this.database
+      .prepare('DELETE FROM workflows WHERE name = ?')
+      .run(name);
+    return result.changes > 0;
+  }
+
+  validateName(name) {
+    if (!validateWorkflowName(name)) {
+      throw new Error(
+        'The workflow name must use only lowercase letters, digits, `-`, or `_` (1-64 characters).',
+      );
+    }
+  }
+
+  validateDescription(description) {
+    if (
+      description !== undefined &&
+      description !== null &&
+      (typeof description !== 'string' ||
+        description.length > MAX_WORKFLOW_DESCRIPTION_LENGTH)
+    ) {
+      throw new Error('The workflow description is invalid.');
+    }
+  }
+
+  validateDirectory(directory) {
+    if (
+      directory !== undefined &&
+      directory !== null &&
+      (typeof directory !== 'string' ||
+        directory.length === 0 ||
+        directory.length > MAX_WORKFLOW_DIRECTORY_LENGTH)
+    ) {
+      throw new Error('The workflow directory is invalid.');
+    }
+  }
+
+  validateDefinitionSize(definition) {
+    if (JSON.stringify(definition).length > MAX_WORKFLOW_DEFINITION_LENGTH) {
+      throw new Error(
+        `The workflow definition exceeds ${MAX_WORKFLOW_DEFINITION_LENGTH} bytes.`,
+      );
+    }
+  }
+
+  close() {
+    this.database.close();
+  }
+}
+
 async function startServer({ databasePath, goalId }) {
   const artifacts = new ArtifactsRepository(databasePath, goalId);
   const tasks = new TasksRepository(databasePath, goalId);
+  const workflows = new WorkflowsRepository(databasePath);
   const server = new McpServer({ name: 'rba-planner', version: '1.0.0' });
 
   server.registerTool(
@@ -611,10 +815,201 @@ async function startServer({ databasePath, goalId }) {
     },
   );
 
+  server.registerTool(
+    'list_workflows',
+    {
+      title: 'List workflows',
+      description:
+        "List the user's registered workflows: named, reusable shell-step sequences they run outside the agent.",
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const current = workflows.list();
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              current.length === 0
+                ? '(there are no workflows yet)'
+                : JSON.stringify(current, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_workflow',
+    {
+      title: 'Get workflow',
+      description:
+        'Read a workflow’s complete definition, so it can be revised rather than blindly overwritten.',
+      inputSchema: { name: z.string().min(1).max(64) },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ name }) => {
+      const workflow = workflows.getByName(name);
+      return workflow
+        ? {
+            content: [
+              { type: 'text', text: JSON.stringify(workflow, null, 2) },
+            ],
+          }
+        : {
+            content: [{ type: 'text', text: 'No workflow has that name.' }],
+            isError: true,
+          };
+    },
+  );
+
+  server.registerTool(
+    'register_workflow',
+    {
+      title: 'Register workflow',
+      description:
+        'Register a new global workflow: a `start` step plus a map of named shell steps. Workflows belong to the user, not this repository. Validate first with validate_workflow if unsure.',
+      inputSchema: {
+        name: z
+          .string()
+          .min(1)
+          .max(64)
+          .describe('lowercase letters, digits, `-`, or `_`'),
+        description: z.string().max(MAX_WORKFLOW_DESCRIPTION_LENGTH).optional(),
+        directory: z
+          .string()
+          .max(MAX_WORKFLOW_DIRECTORY_LENGTH)
+          .optional()
+          .describe('Optional default working directory for runs'),
+        definition: z
+          .object({ start: z.string(), steps: z.record(z.string(), z.any()) })
+          .describe('{ start, steps: { <name>: Step } }'),
+      },
+      annotations: { destructiveHint: false },
+    },
+    async ({ name, description, directory, definition }) => {
+      try {
+        const workflow = workflows.register({
+          name,
+          description,
+          directory,
+          definition,
+        });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Registered ${workflow.name} (${workflow.stepCount} steps). Terminal step: ${Object.entries(
+                workflow.definition.steps,
+              )
+                .filter(([, step]) => step.type === 'terminal')
+                .map(([stepName]) => stepName)
+                .join(', ')}.`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: error.message }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'update_workflow',
+    {
+      title: 'Update workflow',
+      description:
+        'Partially revise an existing workflow. Read get_workflow first. Changing the definition revalidates it.',
+      inputSchema: {
+        name: z.string().min(1).max(64),
+        description: z.string().max(MAX_WORKFLOW_DESCRIPTION_LENGTH).optional(),
+        directory: z.string().max(MAX_WORKFLOW_DIRECTORY_LENGTH).optional(),
+        definition: z
+          .object({ start: z.string(), steps: z.record(z.string(), z.any()) })
+          .optional(),
+      },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ name, description, directory, definition }) => {
+      try {
+        const workflow = workflows.update(name, {
+          description,
+          directory,
+          definition,
+        });
+        return workflow
+          ? {
+              content: [
+                {
+                  type: 'text',
+                  text: `Updated ${workflow.name} (${workflow.stepCount} steps).`,
+                },
+              ],
+            }
+          : {
+              content: [{ type: 'text', text: 'No workflow has that name.' }],
+              isError: true,
+            };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: error.message }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'remove_workflow',
+    {
+      title: 'Remove workflow',
+      description: 'Remove a registered workflow.',
+      inputSchema: { name: z.string().min(1).max(64) },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ name }) =>
+      workflows.remove(name)
+        ? { content: [{ type: 'text', text: 'Workflow removed.' }] }
+        : {
+            content: [{ type: 'text', text: 'No workflow has that name.' }],
+            isError: true,
+          },
+  );
+
+  server.registerTool(
+    'validate_workflow',
+    {
+      title: 'Validate workflow',
+      description:
+        'Validate a draft workflow definition without storing it, so it can be checked mid-conversation.',
+      inputSchema: {
+        definition: z.object({
+          start: z.string(),
+          steps: z.record(z.string(), z.any()),
+        }),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ definition }) => {
+      const normalised = normaliseDefinition(definition);
+      const result = validateDefinition(normalised);
+      return result.ok
+        ? { content: [{ type: 'text', text: 'The definition is valid.' }] }
+        : {
+            content: [{ type: 'text', text: result.errors.join('\n') }],
+            isError: true,
+          };
+    },
+  );
+
   const shutdown = async () => {
     await server.close();
     artifacts.close();
     tasks.close();
+    workflows.close();
   };
   process.once('SIGINT', () => void shutdown());
   process.once('SIGTERM', () => void shutdown());
@@ -635,6 +1030,7 @@ if (require.main === module) {
 module.exports = {
   ArtifactsRepository,
   TasksRepository,
+  WorkflowsRepository,
   MAX_ARTIFACT_HTML_LENGTH,
   MAX_ARTIFACT_TITLE_LENGTH,
   MAX_TASK_SPEC_LENGTH,

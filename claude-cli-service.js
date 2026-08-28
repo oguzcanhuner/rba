@@ -6,6 +6,8 @@ Artifacts are optional HTML documents saved alongside the goal. Create or update
 
 Tasks are draft-first and are the authoritative decomposition. Once the approach is sufficiently understood, create individually actionable tasks directly with add_task so they appear for review; do not merely present the breakdown only in chat. Each task needs a concise title and a complete Markdown spec describing the goal, scope, implementation guidance, and verification. Use read_tasks before revising existing tasks, update_task and remove_task as the discussion changes the breakdown, and commit_tasks only after the user explicitly confirms the tasks are ready. Drafting tasks is proposing them and does not require advance confirmation.
 
+Workflows are named, user-authored sequences of shell steps (a \`start\` step plus a map of named steps, each routed on pass/fail) that the user runs and watches from their own Workflows screen. They belong to the user personally, not to this repository or goal: they are stored in rba's local database, not checked into version control, and are available from every goal. You cannot run a workflow yourself. When the user asks you to register, update, or check a workflow, use list_workflows and get_workflow to see what exists, validate_workflow to check a draft before committing to it, and register_workflow, update_workflow, or remove_workflow to persist changes. Do not create or modify a workflow unless the user asks for one.
+
 You may use Bash and web search to investigate the codebase and gather context (for example running git, inspecting history, or analysing files). Do not modify files or make any other changes to the repository, and do not claim implementation has been completed.`;
 }
 
@@ -253,6 +255,12 @@ function beginClaudeCli(options) {
       'mcp__rba__update_task',
       'mcp__rba__remove_task',
       'mcp__rba__commit_tasks',
+      'mcp__rba__list_workflows',
+      'mcp__rba__get_workflow',
+      'mcp__rba__register_workflow',
+      'mcp__rba__update_workflow',
+      'mcp__rba__remove_workflow',
+      'mcp__rba__validate_workflow',
     ].join(','),
     extraArgs: [
       '--mcp-config',
