@@ -7,6 +7,8 @@ const { promisify } = require('node:util');
 const { beginClaudeCli } = require('./claude-cli-service');
 const { GoalStore } = require('./goal-store');
 const { WorkerService } = require('./worker-service');
+const { WorkflowService } = require('./workflow-service');
+const { validateDefinition, normaliseDefinition } = require('./workflow-spec');
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +16,7 @@ const activeRequests = new Map();
 let goalStore;
 let goalDatabase;
 let workerService;
+let workflowService;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -57,6 +60,17 @@ function broadcastWorker(run) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) {
       window.webContents.send('workers:event', { type: 'worker-updated', run });
+    }
+  }
+}
+
+function broadcastWorkflow(run) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send('workflows:event', {
+        type: 'run-updated',
+        run,
+      });
     }
   }
 }
@@ -724,6 +738,151 @@ ipcMain.handle('settings:set', (event, patch) => {
   return goalStore.updateSettings(patch);
 });
 
+function isValidWorkflowDefinition(definition) {
+  return Boolean(
+    definition &&
+      typeof definition === 'object' &&
+      typeof definition.start === 'string' &&
+      definition.steps &&
+      typeof definition.steps === 'object',
+  );
+}
+
+ipcMain.handle('workflows:list', (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted workflow request.');
+  }
+  return goalStore.listWorkflows();
+});
+
+ipcMain.handle('workflows:get', (event, id) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof id !== 'string' ||
+    id.length === 0 ||
+    id.length > 100
+  ) {
+    throw new Error('Invalid workflow request.');
+  }
+  return goalStore.getWorkflow(id);
+});
+
+ipcMain.handle('workflows:run-get', (event, runId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof runId !== 'string' ||
+    runId.length === 0 ||
+    runId.length > 100
+  ) {
+    throw new Error('Invalid workflow run request.');
+  }
+  return goalStore.getWorkflowRun(runId);
+});
+
+ipcMain.handle('workflows:start', (event, id, options) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof id !== 'string' ||
+    id.length === 0 ||
+    id.length > 100 ||
+    (options !== undefined &&
+      (typeof options !== 'object' ||
+        options === null ||
+        (options.directory !== undefined &&
+          (typeof options.directory !== 'string' ||
+            options.directory.length === 0 ||
+            options.directory.length > 4096)) ||
+        (options.fresh !== undefined && typeof options.fresh !== 'boolean')))
+  ) {
+    throw new Error('Invalid workflow start request.');
+  }
+  return workflowService.start(id, {
+    directory: options?.directory,
+    fresh: options?.fresh,
+  });
+});
+
+ipcMain.handle('workflows:stop', (event, runId) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof runId !== 'string' ||
+    runId.length === 0 ||
+    runId.length > 100
+  ) {
+    throw new Error('Invalid workflow stop request.');
+  }
+  return workflowService.stop(runId);
+});
+
+ipcMain.handle('workflows:delete', (event, id) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    typeof id !== 'string' ||
+    id.length === 0 ||
+    id.length > 100
+  ) {
+    throw new Error('Invalid workflow request.');
+  }
+  goalStore.deleteWorkflow(id);
+});
+
+ipcMain.handle('workflows:save', (event, request) => {
+  if (
+    !isTrustedSender(event.senderFrame) ||
+    !request ||
+    typeof request !== 'object' ||
+    typeof request.name !== 'string' ||
+    request.name.length === 0 ||
+    request.name.length > 64 ||
+    (request.description !== undefined &&
+      request.description !== null &&
+      typeof request.description !== 'string') ||
+    (request.directory !== undefined &&
+      request.directory !== null &&
+      typeof request.directory !== 'string') ||
+    !isValidWorkflowDefinition(request.definition)
+  ) {
+    throw new Error('Invalid workflow.');
+  }
+
+  const definition = normaliseDefinition(request.definition);
+  const validation = validateDefinition(definition);
+  if (!validation.ok) {
+    throw new Error(validation.errors.join(' '));
+  }
+
+  if (request.id) {
+    return goalStore.updateWorkflow(request.id, {
+      description: request.description ?? null,
+      directory: request.directory ?? null,
+      definition,
+    });
+  }
+  return goalStore.createWorkflow({
+    name: request.name,
+    description: request.description ?? null,
+    directory: request.directory ?? null,
+    definition,
+  });
+});
+
+ipcMain.handle('workflows:pick-directory', async (event) => {
+  if (!isTrustedSender(event.senderFrame)) {
+    throw new Error('Untrusted directory request.');
+  }
+
+  const options = {
+    defaultPath: process.cwd(),
+    properties: ['openDirectory'],
+  };
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const result = owner
+    ? await dialog.showOpenDialog(owner, options)
+    : await dialog.showOpenDialog(options);
+
+  return result.canceled ? null : validatedDirectory(result.filePaths[0]);
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 800,
@@ -766,6 +925,10 @@ app.whenReady().then(() => {
     worktreesDirectory: path.join(app.getPath('userData'), 'worktrees'),
     onUpdate: broadcastWorker,
   });
+  workflowService = new WorkflowService({
+    store: goalStore,
+    onUpdate: broadcastWorkflow,
+  });
   createWindow();
 
   app.on('activate', () => {
@@ -777,6 +940,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   workerService?.shutdown();
+  workflowService?.shutdown();
   goalStore?.close();
 });
 
