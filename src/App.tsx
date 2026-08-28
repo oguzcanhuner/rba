@@ -25,6 +25,7 @@ import {
   ResizablePanelGroup,
 } from './components/ui/resizable';
 import { WorkerScreen } from './components/WorkerScreen';
+import { WorkflowsScreen } from './components/WorkflowsScreen';
 import { useGoalStream } from './hooks/useGoalStream';
 import { useTasks } from './hooks/useTasks';
 import { useWorkerRuns } from './hooks/useWorkerRuns';
@@ -55,6 +56,7 @@ export function App() {
   );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isWorkflowsOpen, setIsWorkflowsOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -515,12 +517,12 @@ export function App() {
   return (
     <main
       className={
-        isSettingsOpen
+        isSettingsOpen || isWorkflowsOpen
           ? ''
           : `app-shell${isSidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`
       }
     >
-      {!isSettingsOpen && (
+      {!isSettingsOpen && !isWorkflowsOpen && (
         <GoalSidebar
           goals={goals}
           tasks={tasks.committed}
@@ -542,11 +544,14 @@ export function App() {
           onStartTask={startTaskInBackground}
           onCompleteTask={completeTask}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenWorkflows={() => setIsWorkflowsOpen(true)}
         />
       )}
 
       {isSettingsOpen ? (
         <SettingsScreen onBack={() => setIsSettingsOpen(false)} />
+      ) : isWorkflowsOpen ? (
+        <WorkflowsScreen onBack={() => setIsWorkflowsOpen(false)} />
       ) : activeTask ? (
         <WorkerScreen
           task={activeTask}
