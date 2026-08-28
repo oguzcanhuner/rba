@@ -152,6 +152,95 @@ export type WorkerEvent =
   | { type: 'worker-updated'; run: WorkerRun }
   | { type: 'task-deleted'; taskId: string };
 
+export type WorkflowStepStatus =
+  | 'running'
+  | 'pass'
+  | 'fail'
+  | 'error'
+  | 'stopped';
+
+export type WorkflowRunStatus = 'running' | 'completed' | 'failed' | 'stopped';
+
+export type WorkflowStep = {
+  run?: string;
+  type?: 'terminal';
+  parse?: 'json';
+  next?: string;
+  onPass?: string;
+  onFail?: string;
+  maxVisits?: number;
+  timeoutMs?: number;
+};
+
+export type WorkflowDefinition = {
+  start: string;
+  steps: Record<string, WorkflowStep>;
+};
+
+export type WorkflowRunSummary = {
+  id: string;
+  status: WorkflowRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type WorkflowSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  directory: string | null;
+  stepCount: number;
+  createdAt: string;
+  updatedAt: string;
+  latestRun: WorkflowRunSummary | null;
+};
+
+export type Workflow = {
+  id: string;
+  name: string;
+  description: string | null;
+  directory: string | null;
+  definition: WorkflowDefinition;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkflowStepRun = {
+  id: string;
+  position: number;
+  step: string;
+  status: WorkflowStepStatus;
+  summary: string | null;
+  data: unknown;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type WorkflowRun = {
+  id: string;
+  workflowId: string;
+  status: WorkflowRunStatus;
+  directory: string;
+  currentStep: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  steps: WorkflowStepRun[];
+};
+
+export type WorkflowSaveRequest = {
+  id?: string;
+  name: string;
+  description?: string | null;
+  directory?: string | null;
+  definition: WorkflowDefinition;
+};
+
+export type WorkflowEvent = { type: 'run-updated'; run: WorkflowRun };
+
 declare global {
   interface Window {
     claude: {
@@ -189,6 +278,20 @@ declare global {
       diff(taskId: string): Promise<WorkerDiff>;
       complete(taskId: string): Promise<void>;
       onEvent(callback: (event: WorkerEvent) => void): () => void;
+    };
+    workflows: {
+      list(): Promise<WorkflowSummary[]>;
+      get(id: string): Promise<Workflow | null>;
+      getRun(runId: string): Promise<WorkflowRun | null>;
+      start(
+        id: string,
+        options?: { directory?: string; fresh?: boolean },
+      ): Promise<WorkflowRun>;
+      stop(runId: string): Promise<WorkflowRun>;
+      delete(id: string): Promise<void>;
+      save(workflow: WorkflowSaveRequest): Promise<Workflow>;
+      pickDirectory(): Promise<string | null>;
+      onEvent(callback: (event: WorkflowEvent) => void): () => void;
     };
   }
 }
