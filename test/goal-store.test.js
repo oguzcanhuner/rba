@@ -344,7 +344,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9, 10, 11],
+    [1, 2, 3, 4, 5, 8, 9, 10, 11, 12],
   );
   store.close();
 });
@@ -388,7 +388,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9, 10, 11],
+    [1, 2, 3, 4, 5, 8, 9, 10, 11, 12],
   );
   store.close();
 });
@@ -671,5 +671,166 @@ test('settings persist updates independently', () => {
     workerModel: 'haiku',
   });
 
+  store.close();
+});
+
+function workflowDefinition() {
+  return {
+    start: 'build',
+    steps: {
+      build: { run: 'npm run build', onPass: 'done', onFail: 'done' },
+      done: { type: 'terminal' },
+    },
+  };
+}
+
+test('migration 12 applies to a fresh database and one created before version 12', () => {
+  const fresh = new GoalStore(':memory:');
+  assert.equal(
+    fresh.database
+      .prepare(
+        "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'workflows'",
+      )
+      .get() !== undefined,
+    true,
+  );
+  fresh.close();
+
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-store-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  const oldDatabase = new DatabaseSync(filename);
+  oldDatabase.exec(`
+    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
+    INSERT INTO schema_migrations(version) VALUES (1), (2), (3), (4), (5), (8), (9), (10), (11);
+    CREATE TABLE goals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      working_directory TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      findings_markdown TEXT,
+      unread INTEGER NOT NULL DEFAULT 0,
+      completed_at TEXT
+    );
+  `);
+  oldDatabase.close();
+
+  const upgraded = new GoalStore(filename);
+  const workflow = upgraded.createWorkflow({
+    name: 'ship-task',
+    definition: workflowDefinition(),
+  });
+  assert.equal(workflow.name, 'ship-task');
+  upgraded.close();
+  rmSync(directory, { force: true, recursive: true });
+});
+
+test('workflow names must be unique', () => {
+  const store = new GoalStore(':memory:');
+  store.createWorkflow({ name: 'ship-task', definition: workflowDefinition() });
+  assert.throws(() =>
+    store.createWorkflow({
+      name: 'ship-task',
+      definition: workflowDefinition(),
+    }),
+  );
+  store.close();
+});
+
+test('deleting a workflow cascades to its runs and step runs', () => {
+  const store = new GoalStore(':memory:');
+  const workflow = store.createWorkflow({
+    name: 'ship-task',
+    definition: workflowDefinition(),
+  });
+  const run = store.createWorkflowRun(workflow.id, {
+    directory: '/workspace',
+    currentStep: 'build',
+    startedAt: '2026-08-09T10:00:00.000Z',
+  });
+  store.startStepRun(run.id, {
+    position: 0,
+    step: 'build',
+    startedAt: '2026-08-09T10:00:00.000Z',
+  });
+
+  store.deleteWorkflow(workflow.id);
+
+  assert.equal(store.getWorkflowRun(run.id), null);
+  assert.equal(
+    store.database
+      .prepare(
+        'SELECT COUNT(*) AS count FROM workflow_step_runs WHERE run_id = ?',
+      )
+      .get(run.id).count,
+    0,
+  );
+  store.close();
+});
+
+test('truncates step output to the last 200 KB and prefixes it', () => {
+  const store = new GoalStore(':memory:');
+  const workflow = store.createWorkflow({
+    name: 'ship-task',
+    definition: workflowDefinition(),
+  });
+  const run = store.createWorkflowRun(workflow.id, {
+    directory: '/workspace',
+    currentStep: 'build',
+    startedAt: '2026-08-09T10:00:00.000Z',
+  });
+  const stepRunId = store.startStepRun(run.id, {
+    position: 0,
+    step: 'build',
+    startedAt: '2026-08-09T10:00:00.000Z',
+  });
+
+  store.appendStepOutput(stepRunId, { stdout: 'a'.repeat(150 * 1024) });
+  store.appendStepOutput(stepRunId, {
+    stdout: `${'b'.repeat(100 * 1024)}TAIL`,
+  });
+
+  const { steps } = store.getWorkflowRun(run.id);
+  assert.equal(steps[0].stdout.startsWith('[… truncated]'), true);
+  assert.equal(steps[0].stdout.endsWith('TAIL'), true);
+  assert.equal(
+    Buffer.byteLength(steps[0].stdout, 'utf8') <= 200 * 1024 + 20,
+    true,
+  );
+  store.close();
+});
+
+test('step runs return in position order including a repeated step name', () => {
+  const store = new GoalStore(':memory:');
+  const workflow = store.createWorkflow({
+    name: 'ship-task',
+    definition: workflowDefinition(),
+  });
+  const run = store.createWorkflowRun(workflow.id, {
+    directory: '/workspace',
+    currentStep: 'build',
+    startedAt: '2026-08-09T10:00:00.000Z',
+  });
+  store.startStepRun(run.id, {
+    position: 0,
+    step: 'build',
+    startedAt: '2026-08-09T10:00:00.000Z',
+  });
+  store.startStepRun(run.id, {
+    position: 1,
+    step: 'checks',
+    startedAt: '2026-08-09T10:01:00.000Z',
+  });
+  store.startStepRun(run.id, {
+    position: 2,
+    step: 'build',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+
+  const { steps } = store.getWorkflowRun(run.id);
+  assert.deepEqual(
+    steps.map((step) => step.step),
+    ['build', 'checks', 'build'],
+  );
   store.close();
 });

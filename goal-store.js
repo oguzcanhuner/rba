@@ -1,4 +1,7 @@
+const { randomUUID } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+
+const randomId = randomUUID;
 
 function hasTable(database, table) {
   return Boolean(
@@ -13,6 +16,22 @@ function hasColumn(database, table, column) {
     .prepare(`PRAGMA table_info(${table})`)
     .all()
     .some(({ name }) => name === column);
+}
+
+const MAX_STEP_OUTPUT_BYTES = 200 * 1024;
+const TRUNCATION_PREFIX = '[… truncated]';
+
+function truncateOutput(text) {
+  if (Buffer.byteLength(text, 'utf8') <= MAX_STEP_OUTPUT_BYTES) {
+    return text;
+  }
+  let truncated = Buffer.from(text, 'utf8')
+    .subarray(-MAX_STEP_OUTPUT_BYTES)
+    .toString('utf8');
+  // A byte-boundary slice can land inside a multi-byte character; decoding
+  // replaces it with U+FFFD, so drop a leading replacement character.
+  truncated = truncated.replace(/^�+/, '');
+  return `${TRUNCATION_PREFIX}${truncated}`;
 }
 
 const migrations = [
@@ -201,6 +220,59 @@ const migrations = [
       if (!hasColumn(database, 'goals', 'completed_at')) {
         database.exec('ALTER TABLE goals ADD COLUMN completed_at TEXT');
       }
+    },
+  },
+  {
+    version: 12,
+    isApplied(database) {
+      return ['workflows', 'workflow_runs', 'workflow_step_runs'].every(
+        (table) => hasTable(database, table),
+      );
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS workflows (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT,
+          directory TEXT,
+          definition_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+          id TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+          status TEXT NOT NULL,
+          directory TEXT NOT NULL,
+          current_step TEXT,
+          error TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS workflow_runs_by_workflow
+          ON workflow_runs(workflow_id, started_at);
+
+        CREATE TABLE IF NOT EXISTS workflow_step_runs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          step TEXT NOT NULL,
+          status TEXT NOT NULL,
+          summary TEXT,
+          data_json TEXT,
+          stdout TEXT NOT NULL DEFAULT '',
+          stderr TEXT NOT NULL DEFAULT '',
+          exit_code INTEGER,
+          started_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS workflow_step_runs_by_run
+          ON workflow_step_runs(run_id, position);
+      `);
     },
   },
 ];
@@ -913,6 +985,282 @@ class GoalStore {
       this.database.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  listWorkflows() {
+    return this.database
+      .prepare(`
+        SELECT
+          w.id,
+          w.name,
+          w.description,
+          w.directory,
+          w.definition_json AS definitionJson,
+          w.created_at AS createdAt,
+          w.updated_at AS updatedAt,
+          r.id AS latestRunId,
+          r.status AS latestRunStatus,
+          r.started_at AS latestRunStartedAt,
+          r.finished_at AS latestRunFinishedAt
+        FROM workflows w
+        LEFT JOIN workflow_runs r ON r.id = (
+          SELECT id FROM workflow_runs
+          WHERE workflow_id = w.id
+          ORDER BY started_at DESC
+          LIMIT 1
+        )
+        ORDER BY w.name
+      `)
+      .all()
+      .map((row) => this.formatWorkflowSummary(row));
+  }
+
+  formatWorkflowSummary(row) {
+    const definition = JSON.parse(row.definitionJson);
+    const latestRun =
+      row.latestRunId === null
+        ? null
+        : {
+            id: row.latestRunId,
+            status: row.latestRunStatus,
+            startedAt: row.latestRunStartedAt,
+            finishedAt: row.latestRunFinishedAt,
+          };
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      directory: row.directory,
+      stepCount: Object.keys(definition.steps ?? {}).length,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      latestRun,
+    };
+  }
+
+  getWorkflow(id) {
+    const row = this.database
+      .prepare(`
+        SELECT id, name, description, directory,
+               definition_json AS definitionJson,
+               created_at AS createdAt, updated_at AS updatedAt
+        FROM workflows WHERE id = ?
+      `)
+      .get(id);
+    return row ? this.formatWorkflow(row) : null;
+  }
+
+  getWorkflowByName(name) {
+    const row = this.database
+      .prepare(`
+        SELECT id, name, description, directory,
+               definition_json AS definitionJson,
+               created_at AS createdAt, updated_at AS updatedAt
+        FROM workflows WHERE name = ?
+      `)
+      .get(name);
+    return row ? this.formatWorkflow(row) : null;
+  }
+
+  formatWorkflow(row) {
+    const { definitionJson, ...rest } = row;
+    return { ...rest, definition: JSON.parse(definitionJson) };
+  }
+
+  createWorkflow({ name, description = null, directory = null, definition }) {
+    const id = randomId();
+    const now = new Date().toISOString();
+    try {
+      this.database
+        .prepare(`
+          INSERT INTO workflows (
+            id, name, description, directory, definition_json,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          id,
+          name,
+          description,
+          directory,
+          JSON.stringify(definition),
+          now,
+          now,
+        );
+    } catch (error) {
+      if (/UNIQUE constraint failed/.test(error.message)) {
+        throw new Error(`A workflow named \`${name}\` already exists.`);
+      }
+      throw error;
+    }
+    return this.getWorkflow(id);
+  }
+
+  updateWorkflow(id, fields) {
+    const workflow = this.getWorkflow(id);
+    if (!workflow) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    const description =
+      fields.description !== undefined
+        ? fields.description
+        : workflow.description;
+    const directory =
+      fields.directory !== undefined ? fields.directory : workflow.directory;
+    const definition = fields.definition ?? workflow.definition;
+    this.database
+      .prepare(`
+        UPDATE workflows
+        SET description = ?, directory = ?, definition_json = ?, updated_at = ?
+        WHERE id = ?
+      `)
+      .run(description, directory, JSON.stringify(definition), now, id);
+    return this.getWorkflow(id);
+  }
+
+  deleteWorkflow(id) {
+    const result = this.database
+      .prepare('DELETE FROM workflows WHERE id = ?')
+      .run(id);
+    if (result.changes === 0) {
+      throw new Error('This workflow no longer exists.');
+    }
+  }
+
+  createWorkflowRun(workflowId, { directory, currentStep, startedAt }) {
+    const id = randomId();
+    this.database
+      .prepare(`
+        INSERT INTO workflow_runs (
+          id, workflow_id, status, directory, current_step, started_at
+        ) VALUES (?, ?, 'running', ?, ?, ?)
+      `)
+      .run(id, workflowId, directory, currentStep, startedAt);
+    return this.getWorkflowRun(id);
+  }
+
+  getWorkflowRun(id) {
+    const run = this.database
+      .prepare(`
+        SELECT
+          id, workflow_id AS workflowId, status, directory,
+          current_step AS currentStep, error,
+          started_at AS startedAt, finished_at AS finishedAt
+        FROM workflow_runs WHERE id = ?
+      `)
+      .get(id);
+    if (!run) {
+      return null;
+    }
+    const steps = this.database
+      .prepare(`
+        SELECT
+          id, position, step, status, summary,
+          data_json AS dataJson, stdout, stderr,
+          exit_code AS exitCode,
+          started_at AS startedAt, finished_at AS finishedAt
+        FROM workflow_step_runs
+        WHERE run_id = ?
+        ORDER BY position
+      `)
+      .all(id)
+      .map(({ dataJson, ...step }) => ({
+        ...step,
+        data: dataJson ? JSON.parse(dataJson) : null,
+      }));
+    return { ...run, steps };
+  }
+
+  getLatestWorkflowRun(workflowId) {
+    const row = this.database
+      .prepare(`
+        SELECT id FROM workflow_runs
+        WHERE workflow_id = ?
+        ORDER BY started_at DESC
+        LIMIT 1
+      `)
+      .get(workflowId);
+    return row ? this.getWorkflowRun(row.id) : null;
+  }
+
+  listWorkflowRuns(workflowId) {
+    return this.database
+      .prepare(`
+        SELECT id FROM workflow_runs
+        WHERE workflow_id = ?
+        ORDER BY started_at DESC
+      `)
+      .all(workflowId)
+      .map(({ id }) => this.getWorkflowRun(id));
+  }
+
+  updateWorkflowRun(id, { status, currentStep, error = null }) {
+    const now = new Date().toISOString();
+    const finishedAt = status === 'running' ? null : now;
+    const result = this.database
+      .prepare(`
+        UPDATE workflow_runs
+        SET status = ?, current_step = ?, error = ?, finished_at = ?
+        WHERE id = ?
+      `)
+      .run(status, currentStep ?? null, error, finishedAt, id);
+    if (result.changes === 0) {
+      throw new Error('This workflow run no longer exists.');
+    }
+    return this.getWorkflowRun(id);
+  }
+
+  startStepRun(runId, { position, step, startedAt }) {
+    const id = randomId();
+    this.database
+      .prepare(`
+        INSERT INTO workflow_step_runs (
+          id, run_id, position, step, status, started_at
+        ) VALUES (?, ?, ?, ?, 'running', ?)
+      `)
+      .run(id, runId, position, step, startedAt);
+    return id;
+  }
+
+  finishStepRun(
+    stepRunId,
+    { status, summary = null, data = null, exitCode = null },
+  ) {
+    const now = new Date().toISOString();
+    this.database
+      .prepare(`
+        UPDATE workflow_step_runs
+        SET status = ?, summary = ?, data_json = ?, exit_code = ?, finished_at = ?
+        WHERE id = ?
+      `)
+      .run(
+        status,
+        summary,
+        data === null ? null : JSON.stringify(data),
+        exitCode,
+        now,
+        stepRunId,
+      );
+  }
+
+  appendStepOutput(stepRunId, { stdout = '', stderr = '' }) {
+    if (!stdout && !stderr) {
+      return;
+    }
+    const row = this.database
+      .prepare('SELECT stdout, stderr FROM workflow_step_runs WHERE id = ?')
+      .get(stepRunId);
+    if (!row) {
+      return;
+    }
+    const nextStdout = truncateOutput(row.stdout + stdout);
+    const nextStderr = truncateOutput(row.stderr + stderr);
+    this.database
+      .prepare(
+        'UPDATE workflow_step_runs SET stdout = ?, stderr = ? WHERE id = ?',
+      )
+      .run(nextStdout, nextStderr, stepRunId);
   }
 
   close() {
