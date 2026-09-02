@@ -15,6 +15,7 @@ export function useWorkflows() {
   );
   const [activeRun, setActiveRun] = useState<WorkflowRun | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -119,6 +120,7 @@ export function useWorkflows() {
   const remove = useCallback(
     async (id: string) => {
       setError(null);
+      setDeleting(true);
       try {
         await window.workflows.delete(id);
         if (selectedId === id) {
@@ -129,6 +131,8 @@ export function useWorkflows() {
         await reload();
       } catch {
         setError('This workflow could not be deleted.');
+      } finally {
+        setDeleting(false);
       }
     },
     [selectedId, reload],
@@ -140,6 +144,7 @@ export function useWorkflows() {
     selectedWorkflow,
     activeRun,
     error,
+    deleting,
     setError,
     select,
     openRun,

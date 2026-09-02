@@ -533,6 +533,18 @@ class WorkflowsRepository {
   }
 
   remove(name) {
+    const running = this.database
+      .prepare(`
+        SELECT 1
+        FROM workflow_runs r
+        JOIN workflows w ON w.id = r.workflow_id
+        WHERE w.name = ? AND r.status = 'running'
+        LIMIT 1
+      `)
+      .get(name);
+    if (running) {
+      throw new Error('A running workflow cannot be removed.');
+    }
     const result = this.database
       .prepare('DELETE FROM workflows WHERE name = ?')
       .run(name);
@@ -1204,13 +1216,21 @@ async function startServer({ databasePath, goalId }) {
       inputSchema: { name: z.string().min(1).max(64) },
       annotations: { destructiveHint: true, idempotentHint: true },
     },
-    async ({ name }) =>
-      workflows.remove(name)
-        ? { content: [{ type: 'text', text: 'Workflow removed.' }] }
-        : {
-            content: [{ type: 'text', text: 'No workflow has that name.' }],
-            isError: true,
-          },
+    async ({ name }) => {
+      try {
+        return workflows.remove(name)
+          ? { content: [{ type: 'text', text: 'Workflow removed.' }] }
+          : {
+              content: [{ type: 'text', text: 'No workflow has that name.' }],
+              isError: true,
+            };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: error.message }],
+          isError: true,
+        };
+      }
+    },
   );
 
   server.registerTool(

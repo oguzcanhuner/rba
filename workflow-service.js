@@ -51,10 +51,18 @@ function safeParseJsonStatus(text) {
  * timeout) halts the run instead of routing, so a broken workflow never
  * looks like one that decided something. */
 class WorkflowService {
-  constructor({ store, onUpdate = () => {}, spawnProcess = spawn }) {
+  constructor({
+    store,
+    onUpdate = () => {},
+    spawnProcess = spawn,
+    killProcessGroup = (pid, signal) => process.kill(-pid, signal),
+    killGraceMs = KILL_GRACE_MS,
+  }) {
     this.store = store;
     this.onUpdate = onUpdate;
     this.spawnProcess = spawnProcess;
+    this.killProcessGroup = killProcessGroup;
+    this.killGraceMs = killGraceMs;
     this.running = new Map(); // workflowId -> runtime
     this.disposed = false;
   }
@@ -115,7 +123,7 @@ class WorkflowService {
     };
     this.running.set(workflowId, runtime);
     void this.drive(runtime, definition.start);
-    return this.store.getWorkflowRun(run.id);
+    return this.withActivity(this.store.getWorkflowRun(run.id));
   }
 
   resume(workflow, definition, run) {
@@ -130,7 +138,7 @@ class WorkflowService {
     };
     this.running.set(workflow.id, runtime);
     void this.drive(runtime, run.currentStep);
-    return run;
+    return this.withActivity(run);
   }
 
   async drive(runtime, stepName) {
@@ -263,7 +271,6 @@ class WorkflowService {
       let pendingStderr = '';
       let settled = false;
       let timeoutHandle;
-      let killHandle;
 
       const flush = () => {
         if (pendingStdout || pendingStderr) {
@@ -282,9 +289,7 @@ class WorkflowService {
         clearInterval(runtime.flushTimer);
         runtime.flushTimer = null;
         clearTimeout(timeoutHandle);
-        clearTimeout(killHandle);
         runtime.timeoutHandle = null;
-        runtime.killHandle = null;
         flush();
         runtime.child = null;
       };
@@ -305,29 +310,22 @@ class WorkflowService {
         cleanup();
         resolve(result);
       };
-      timeoutHandle = setTimeout(() => {
+      runtime.childClosed = new Promise((resolveClosed) => {
+        runtime.resolveChildClosed = resolveClosed;
+      });
+      timeoutHandle = setTimeout(async () => {
         if (settled) return;
-        try {
-          process.kill(-child.pid, 'SIGTERM');
-        } catch {
-          child.kill('SIGTERM');
-        }
-        killHandle = setTimeout(() => {
-          try {
-            process.kill(-child.pid, 'SIGKILL');
-          } catch {
-            child.kill('SIGKILL');
-          }
-        }, KILL_GRACE_MS);
-        runtime.killHandle = killHandle;
-        runtime.settle({
+        runtime.terminationResult = {
           status: 'error',
           error: `Step \`${stepName}\` timed out after ${timeoutMs}ms.`,
-        });
+        };
+        await this.terminateChild(runtime);
+        runtime.settle(runtime.terminationResult);
       }, timeoutMs);
       runtime.timeoutHandle = timeoutHandle;
 
       child.once('error', (error) => {
+        runtime.resolveChildClosed?.();
         if (settled) return;
         settled = true;
         cleanup();
@@ -335,7 +333,12 @@ class WorkflowService {
       });
 
       child.once('close', (code) => {
+        runtime.resolveChildClosed?.();
         if (settled) return;
+        if (runtime.terminationResult) {
+          runtime.settle(runtime.terminationResult);
+          return;
+        }
         settled = true;
         cleanup();
 
@@ -367,19 +370,48 @@ class WorkflowService {
     });
   }
 
-  stop(runId) {
+  signalChild(child, signal) {
+    try {
+      this.killProcessGroup(child.pid, signal);
+    } catch {
+      child.kill(signal);
+    }
+  }
+
+  async terminateChild(runtime) {
+    const child = runtime.child;
+    if (!child) return;
+    this.signalChild(child, 'SIGTERM');
+    let graceTimer;
+    const exited = await Promise.race([
+      runtime.childClosed.then(() => true),
+      new Promise((resolve) => {
+        graceTimer = setTimeout(() => resolve(false), this.killGraceMs);
+      }),
+    ]);
+    clearTimeout(graceTimer);
+    if (!exited && runtime.child === child) {
+      this.signalChild(child, 'SIGKILL');
+    }
+  }
+
+  isRunning(runId) {
+    return [...this.running.values()].some(
+      (runtime) => runtime.runId === runId,
+    );
+  }
+
+  withActivity(run) {
+    return run ? { ...run, isActive: this.isRunning(run.id) } : null;
+  }
+
+  async stop(runId) {
     const runtime = [...this.running.values()].find((r) => r.runId === runId);
     if (!runtime) {
       throw new Error('This workflow run is not running.');
     }
     runtime.stopped = true;
-    if (runtime.child) {
-      try {
-        process.kill(-runtime.child.pid, 'SIGTERM');
-      } catch {
-        runtime.child.kill('SIGTERM');
-      }
-    }
+    await this.terminateChild(runtime);
     if (runtime.flushTimer) {
       clearInterval(runtime.flushTimer);
       runtime.flushTimer = null;
@@ -387,10 +419,6 @@ class WorkflowService {
     if (runtime.timeoutHandle) {
       clearTimeout(runtime.timeoutHandle);
       runtime.timeoutHandle = null;
-    }
-    if (runtime.killHandle) {
-      clearTimeout(runtime.killHandle);
-      runtime.killHandle = null;
     }
     runtime.settle?.({ status: 'error', error: 'Stopped.' });
     const run = this.store.getWorkflowRun(runId);
@@ -406,13 +434,29 @@ class WorkflowService {
     if (!this.disposed) {
       this.onUpdate(stoppedRun);
     }
-    return stoppedRun;
+    return this.withActivity(stoppedRun);
   }
 
-  shutdown() {
+  async delete(workflowId) {
+    const runtime = this.running.get(workflowId);
+    if (runtime) {
+      await this.stop(runtime.runId);
+    } else {
+      const latest = this.store.getLatestWorkflowRun(workflowId);
+      if (latest?.status === 'running') {
+        this.store.updateWorkflowRun(latest.id, {
+          status: 'stopped',
+          currentStep: latest.currentStep,
+        });
+      }
+    }
+    this.store.deleteWorkflow(workflowId);
+  }
+
+  async shutdown() {
     for (const runtime of this.running.values()) {
       try {
-        this.stop(runtime.runId);
+        await this.stop(runtime.runId);
       } catch {
         // Already finished between the check and the call.
       }
@@ -431,13 +475,13 @@ class WorkflowService {
     });
     this.running.delete(runtime.workflowId);
     if (!this.disposed) {
-      this.onUpdate(run);
+      this.onUpdate(this.withActivity(run));
     }
   }
 
   broadcast(runId) {
     if (!this.disposed) {
-      this.onUpdate(this.store.getWorkflowRun(runId));
+      this.onUpdate(this.withActivity(this.store.getWorkflowRun(runId)));
     }
   }
 }

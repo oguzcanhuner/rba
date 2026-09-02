@@ -1,7 +1,27 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { WorkflowDefinition, WorkflowStepRun } from '../src/claude.ts';
-import { buildWorkflowTimeline } from '../src/lib/workflowTimeline.ts';
+import {
+  buildWorkflowTimeline,
+  workflowRunControls,
+} from '../src/lib/workflowTimeline.ts';
+
+test('persisted running runs are resumable when no process is active', () => {
+  assert.deepEqual(
+    workflowRunControls(
+      { id: 'run-1', status: 'running', isActive: false },
+      'run-1',
+    ),
+    { isRunning: false, canResume: true },
+  );
+  assert.deepEqual(
+    workflowRunControls(
+      { id: 'run-1', status: 'running', isActive: true },
+      'run-1',
+    ),
+    { isRunning: true, canResume: false },
+  );
+});
 
 function step(overrides: Partial<WorkflowStepRun>): WorkflowStepRun {
   return {
