@@ -344,7 +344,7 @@ test('records each applied schema migration', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9, 10, 11],
+    [1, 2, 3, 4, 5, 8, 9, 10, 11, 12],
   );
   store.close();
 });
@@ -388,7 +388,7 @@ test('repairs a missing findings column even when migration 2 is marked complete
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 8, 9, 10, 11],
+    [1, 2, 3, 4, 5, 8, 9, 10, 11, 12],
   );
   store.close();
 });
@@ -653,6 +653,259 @@ test('settings default to sonnet when unset', () => {
     plannerModel: 'sonnet',
     workerModel: 'sonnet',
   });
+  store.close();
+});
+
+function insertTask(
+  store,
+  { id, goalId = 'goal-1', sequence, title, status = 'queued' },
+) {
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      id,
+      goalId,
+      sequence,
+      title,
+      'Do the thing.',
+      status,
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+}
+
+test('migration 12 creates task_dependencies and is idempotent', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-store-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+
+  const store = new GoalStore(filename);
+  assert.equal(
+    store.database
+      .prepare(
+        "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'task_dependencies'",
+      )
+      .get() !== undefined,
+    true,
+  );
+  store.close();
+
+  const reopened = new GoalStore(filename);
+  assert.deepEqual(
+    reopened.database
+      .prepare('SELECT version FROM schema_migrations ORDER BY version')
+      .all()
+      .map(({ version }) => version),
+    [1, 2, 3, 4, 5, 8, 9, 10, 11, 12],
+  );
+  reopened.close();
+  rmSync(directory, { force: true, recursive: true });
+});
+
+test('setTaskDependencies stores, replaces, and clears edges', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'First' });
+  insertTask(store, { id: 'task-2', sequence: 2, title: 'Second' });
+  insertTask(store, { id: 'task-3', sequence: 3, title: 'Third' });
+
+  store.setTaskDependencies('task-3', ['task-1', 'task-2']);
+  assert.deepEqual(store.getTaskDependencies('task-3').sort(), [
+    'task-1',
+    'task-2',
+  ]);
+
+  store.setTaskDependencies('task-3', ['task-1']);
+  assert.deepEqual(store.getTaskDependencies('task-3'), ['task-1']);
+
+  store.setTaskDependencies('task-3', []);
+  assert.deepEqual(store.getTaskDependencies('task-3'), []);
+  store.close();
+});
+
+test('setTaskDependencies validates before writing', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  store.save(goal({ id: 'goal-2' }));
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'First' });
+  insertTask(store, { id: 'task-2', sequence: 2, title: 'Second' });
+  insertTask(store, { id: 'task-3', sequence: 3, title: 'Third' });
+  insertTask(store, {
+    id: 'task-other-goal',
+    goalId: 'goal-2',
+    sequence: 1,
+    title: 'Other goal task',
+  });
+
+  assert.throws(
+    () => store.setTaskDependencies('missing', ['task-1']),
+    /This task no longer exists\./,
+  );
+  assert.throws(
+    () => store.setTaskDependencies('task-1', ['missing']),
+    /A dependency task no longer exists\./,
+  );
+  assert.throws(
+    () => store.setTaskDependencies('task-1', ['task-other-goal']),
+    /Tasks can only depend on tasks in the same goal\./,
+  );
+  assert.throws(
+    () => store.setTaskDependencies('task-1', ['task-1']),
+    /A task cannot depend on itself\./,
+  );
+
+  store.setTaskDependencies('task-2', ['task-1']);
+  store.setTaskDependencies('task-3', ['task-2']);
+  assert.throws(
+    () => store.setTaskDependencies('task-1', ['task-3']),
+    /That dependency would create a cycle\./,
+  );
+  store.close();
+});
+
+test('deleting a task cascades dependency rows in both directions', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'First' });
+  insertTask(store, { id: 'task-2', sequence: 2, title: 'Second' });
+  insertTask(store, { id: 'task-3', sequence: 3, title: 'Third' });
+  store.setTaskDependencies('task-2', ['task-1']);
+  store.setTaskDependencies('task-3', ['task-2']);
+
+  store.deleteTask('task-2');
+
+  assert.equal(
+    store.database
+      .prepare(
+        'SELECT 1 FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?',
+      )
+      .get('task-2', 'task-2'),
+    undefined,
+  );
+  store.close();
+});
+
+test('getBlockingDependencies returns only unmerged dependencies ordered by sequence', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, {
+    id: 'task-1',
+    sequence: 1,
+    title: 'First',
+    status: 'queued',
+  });
+  insertTask(store, {
+    id: 'task-2',
+    sequence: 2,
+    title: 'Second',
+    status: 'queued',
+  });
+  insertTask(store, { id: 'task-3', sequence: 3, title: 'Third' });
+  store.setTaskDependencies('task-3', ['task-2', 'task-1']);
+
+  assert.deepEqual(
+    store.getBlockingDependencies('task-3').map(({ id }) => id),
+    ['task-1', 'task-2'],
+  );
+
+  store.database
+    .prepare(
+      "UPDATE tasks SET status = 'merged' WHERE id IN ('task-1', 'task-2')",
+    )
+    .run();
+
+  assert.deepEqual(store.getBlockingDependencies('task-3'), []);
+  store.close();
+});
+
+test('createWorkerRun is blocked by unmerged dependencies and unblocks once they merge', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'Add the schema' });
+  insertTask(store, { id: 'task-2', sequence: 2, title: 'Wire the handler' });
+  insertTask(store, { id: 'task-3', sequence: 3, title: 'Dependent task' });
+  store.setTaskDependencies('task-3', ['task-1', 'task-2']);
+
+  assert.throws(
+    () =>
+      store.createWorkerRun('task-3', {
+        branch: 'rba/task-3',
+        worktree: '/worktrees/task-3',
+        startedAt: '2026-08-09T10:02:00.000Z',
+      }),
+    /Blocked by unmerged tasks: Add the schema, Wire the handler\./,
+  );
+
+  for (const taskId of ['task-1', 'task-2']) {
+    store.createWorkerRun(taskId, {
+      branch: `rba/${taskId}`,
+      worktree: `/worktrees/${taskId}`,
+      startedAt: '2026-08-09T10:02:00.000Z',
+    });
+    store.updateWorkerRun(taskId, { status: 'completed' });
+    store.completeTask(taskId);
+  }
+
+  const run = store.createWorkerRun('task-3', {
+    branch: 'rba/task-3',
+    worktree: '/worktrees/task-3',
+    startedAt: '2026-08-09T10:05:00.000Z',
+  });
+  assert.equal(run.status, 'working');
+  store.close();
+});
+
+test('createWorkerRun is unaffected for a task with no dependencies', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'Standalone' });
+
+  const run = store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  assert.equal(run.status, 'working');
+  store.close();
+});
+
+test('completing the last dependency does not start the dependent task', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'Dependency' });
+  insertTask(store, { id: 'task-2', sequence: 2, title: 'Dependent' });
+  store.setTaskDependencies('task-2', ['task-1']);
+
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    startedAt: '2026-08-09T10:02:00.000Z',
+  });
+  store.updateWorkerRun('task-1', { status: 'completed' });
+  store.completeTask('task-1');
+
+  assert.equal(
+    store.get('goal-1').tasks.find((t) => t.id === 'task-2').status,
+    'queued',
+  );
+  assert.equal(store.getWorkerRun('task-2'), null);
+  store.close();
+});
+
+test('listCommittedTasks reports dependsOn', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  insertTask(store, { id: 'task-1', sequence: 1, title: 'First' });
+  insertTask(store, { id: 'task-2', sequence: 2, title: 'Second' });
+  store.setTaskDependencies('task-2', ['task-1']);
+
+  const tasks = store.listCommittedTasks();
+  assert.deepEqual(tasks.find((t) => t.id === 'task-2').dependsOn, ['task-1']);
+  assert.deepEqual(tasks.find((t) => t.id === 'task-1').dependsOn, []);
   store.close();
 });
 

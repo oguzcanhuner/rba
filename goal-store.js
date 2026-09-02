@@ -203,6 +203,24 @@ const migrations = [
       }
     },
   },
+  {
+    version: 12,
+    isApplied(database) {
+      return hasTable(database, 'task_dependencies');
+    },
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          PRIMARY KEY (task_id, depends_on_task_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS task_dependencies_by_dependency
+          ON task_dependencies(depends_on_task_id);
+      `);
+    },
+  },
 ];
 
 function migrate(database) {
@@ -469,7 +487,7 @@ class GoalStore {
   }
 
   listCommittedTasks() {
-    return this.database
+    const tasks = this.database
       .prepare(`
         SELECT
           t.id,
@@ -486,8 +504,153 @@ class GoalStore {
         WHERE t.status <> 'draft'
         ORDER BY t.created_at DESC
       `)
-      .all()
+      .all();
+
+    const dependsOnByTaskId = new Map();
+    if (tasks.length > 0) {
+      const placeholders = tasks.map(() => '?').join(', ');
+      const edges = this.database
+        .prepare(`
+          SELECT task_id AS taskId, depends_on_task_id AS dependsOnTaskId
+          FROM task_dependencies
+          WHERE task_id IN (${placeholders})
+        `)
+        .all(...tasks.map((task) => task.id));
+      for (const { taskId, dependsOnTaskId } of edges) {
+        if (!dependsOnByTaskId.has(taskId)) {
+          dependsOnByTaskId.set(taskId, []);
+        }
+        dependsOnByTaskId.get(taskId).push(dependsOnTaskId);
+      }
+    }
+
+    return tasks.map((row) => ({
+      ...row,
+      dependsOn: dependsOnByTaskId.get(row.id) ?? [],
+    }));
+  }
+
+  listTaskDependencies(goalId) {
+    return this.database
+      .prepare(`
+        SELECT
+          d.task_id AS taskId,
+          d.depends_on_task_id AS dependsOnTaskId
+        FROM task_dependencies d
+        JOIN tasks t ON t.id = d.task_id
+        WHERE t.goal_id = ?
+      `)
+      .all(goalId)
       .map((row) => ({ ...row }));
+  }
+
+  getTaskDependencies(taskId) {
+    return this.database
+      .prepare(`
+        SELECT depends_on_task_id AS dependsOnTaskId
+        FROM task_dependencies
+        WHERE task_id = ?
+      `)
+      .all(taskId)
+      .map(({ dependsOnTaskId }) => dependsOnTaskId);
+  }
+
+  getBlockingDependencies(taskId) {
+    return this.database
+      .prepare(`
+        SELECT t.id, t.sequence, t.title, t.status
+        FROM task_dependencies d
+        JOIN tasks t ON t.id = d.depends_on_task_id
+        WHERE d.task_id = ? AND t.status <> 'merged'
+        ORDER BY t.sequence
+      `)
+      .all(taskId)
+      .map((row) => ({ ...row }));
+  }
+
+  setTaskDependencies(taskId, dependsOnTaskIds) {
+    const task = this.database
+      .prepare('SELECT goal_id AS goalId FROM tasks WHERE id = ?')
+      .get(taskId);
+    if (!task) {
+      throw new Error('This task no longer exists.');
+    }
+
+    if (dependsOnTaskIds.includes(taskId)) {
+      throw new Error('A task cannot depend on itself.');
+    }
+
+    for (const dependsOnTaskId of dependsOnTaskIds) {
+      const dependency = this.database
+        .prepare('SELECT goal_id AS goalId FROM tasks WHERE id = ?')
+        .get(dependsOnTaskId);
+      if (!dependency) {
+        throw new Error('A dependency task no longer exists.');
+      }
+      if (dependency.goalId !== task.goalId) {
+        throw new Error('Tasks can only depend on tasks in the same goal.');
+      }
+    }
+
+    const existingEdges = this.listTaskDependencies(task.goalId).filter(
+      (edge) => edge.taskId !== taskId,
+    );
+    const proposedEdges = [
+      ...existingEdges,
+      ...dependsOnTaskIds.map((dependsOnTaskId) => ({
+        taskId,
+        dependsOnTaskId,
+      })),
+    ];
+    const edgesByTaskId = new Map();
+    for (const edge of proposedEdges) {
+      if (!edgesByTaskId.has(edge.taskId)) {
+        edgesByTaskId.set(edge.taskId, []);
+      }
+      edgesByTaskId.get(edge.taskId).push(edge.dependsOnTaskId);
+    }
+    const isReachable = (fromId, targetId, visited) => {
+      if (fromId === targetId) {
+        return true;
+      }
+      if (visited.has(fromId)) {
+        return false;
+      }
+      visited.add(fromId);
+      for (const nextId of edgesByTaskId.get(fromId) ?? []) {
+        if (isReachable(nextId, targetId, visited)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    for (const dependsOnTaskId of dependsOnTaskIds) {
+      if (isReachable(dependsOnTaskId, taskId, new Set())) {
+        throw new Error('That dependency would create a cycle.');
+      }
+    }
+
+    const now = new Date().toISOString();
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      this.database
+        .prepare('DELETE FROM task_dependencies WHERE task_id = ?')
+        .run(taskId);
+      const insertDependency = this.database.prepare(`
+        INSERT INTO task_dependencies (task_id, depends_on_task_id)
+        VALUES (?, ?)
+      `);
+      for (const dependsOnTaskId of dependsOnTaskIds) {
+        insertDependency.run(taskId, dependsOnTaskId);
+      }
+      this.database
+        .prepare('UPDATE goals SET updated_at = ? WHERE id = ?')
+        .run(now, task.goalId);
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   commitTasks(goalId) {
@@ -548,6 +711,21 @@ class GoalStore {
       }
       if (task.status !== 'queued') {
         throw new Error('Only queued tasks can be started.');
+      }
+
+      const blockers = this.database
+        .prepare(`
+          SELECT t.title
+          FROM task_dependencies d
+          JOIN tasks t ON t.id = d.depends_on_task_id
+          WHERE d.task_id = ? AND t.status <> 'merged'
+          ORDER BY t.sequence
+        `)
+        .all(taskId);
+      if (blockers.length > 0) {
+        throw new Error(
+          `Blocked by unmerged tasks: ${blockers.map((b) => b.title).join(', ')}.`,
+        );
       }
 
       this.database
