@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DisplayMessage, Goal } from '../src/claude.ts';
-import { goalIdForRequest, updateAssistant } from '../src/lib/goalState.ts';
+import {
+  goalIdForRequest,
+  updateAssistant,
+  withoutMapEntry,
+} from '../src/lib/goalState.ts';
 
 function assistantMessage(requestId: string): DisplayMessage {
   return {
@@ -22,6 +26,8 @@ function goal(id: string, requestId: string): Goal {
     messages: [assistantMessage(requestId)],
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    unread: false,
+    completed: false,
   };
 }
 
@@ -38,6 +44,27 @@ test('goalIdForRequest returns null for an untracked requestId', () => {
   const busyRequests = new Map([['goal-a', 'request-a']]);
 
   assert.equal(goalIdForRequest(busyRequests, 'unknown'), null);
+});
+
+test('deleted goal state no longer matches later stream events', () => {
+  const goals = new Map([
+    ['goal-a', goal('goal-a', 'request-a')],
+    ['goal-b', goal('goal-b', 'request-b')],
+  ]);
+  const requests = new Map([
+    ['goal-a', 'request-a'],
+    ['goal-b', 'request-b'],
+  ]);
+
+  const remainingGoals = withoutMapEntry(goals, 'goal-a');
+  const remainingRequests = withoutMapEntry(requests, 'goal-a');
+
+  assert.equal(remainingGoals.has('goal-a'), false);
+  assert.equal(remainingGoals.has('goal-b'), true);
+  assert.equal(goalIdForRequest(remainingRequests, 'request-a'), null);
+  assert.equal(goalIdForRequest(remainingRequests, 'request-b'), 'goal-b');
+  assert.equal(goals.has('goal-a'), true);
+  assert.equal(requests.has('goal-a'), true);
 });
 
 test('updateAssistant only touches the message matching the requestId, leaving other goals untouched by construction', () => {

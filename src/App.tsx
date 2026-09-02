@@ -34,6 +34,7 @@ import {
   restoreInterruptedMessages,
   summaryOf,
   updateAssistant,
+  withoutMapEntry,
 } from './lib/goalState';
 
 export function App() {
@@ -408,7 +409,14 @@ export function App() {
 
   async function deleteGoal(id: string) {
     try {
-      await window.goals.delete(id);
+      const result = await window.goals.delete(id);
+      if (!result.deleted) {
+        return;
+      }
+      const remainingGoals = withoutMapEntry(goalsCacheRef.current, id);
+      goalsCacheRef.current = remainingGoals;
+      setGoalsCache(remainingGoals);
+      setBusyRequests((current) => withoutMapEntry(current, id));
       setGoals((current) => current.filter((item) => item.id !== id));
       replaceGoalTasks(id, '', []);
       if (id === activeGoalId) {

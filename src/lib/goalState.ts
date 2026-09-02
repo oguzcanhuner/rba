@@ -91,6 +91,13 @@ export function goalIdForRequest(
   return null;
 }
 
+/** Returns a copy without the specified entry, leaving React state immutable. */
+export function withoutMapEntry<K, V>(map: Map<K, V>, key: K) {
+  const remaining = new Map(map);
+  remaining.delete(key);
+  return remaining;
+}
+
 export function updateAssistant(
   goal: Goal,
   requestId: string,

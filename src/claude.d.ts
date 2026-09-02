@@ -170,7 +170,7 @@ declare global {
       rename(id: string, title: string): Promise<void>;
       complete(id: string): Promise<void>;
       reopen(id: string): Promise<void>;
-      delete(id: string): Promise<void>;
+      delete(id: string): Promise<{ deleted: boolean }>;
       commitTasks(goalId: string): Promise<Task[]>;
     };
     tasks: {

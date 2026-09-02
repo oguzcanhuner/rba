@@ -238,12 +238,17 @@ async function startClaudeRequest(event, request) {
     requestId: request.requestId,
     goalId: request.goalId,
     cancelled: false,
+    deleted: false,
     cancel: () => {},
   };
   activeRequests.set(activeRequestKey, activeRequest);
 
   try {
     const cwd = await validatedDirectory(request.cwd);
+
+    if (activeRequest.deleted) {
+      return;
+    }
 
     if (activeRequest.cancelled) {
       sendClaudeEvent(event.sender, {
@@ -278,6 +283,9 @@ async function startClaudeRequest(event, request) {
         env: { ELECTRON_RUN_AS_NODE: '1' },
       },
       onText: (text) => {
+        if (activeRequest.deleted) {
+          return;
+        }
         sendClaudeEvent(event.sender, {
           type: 'text-delta',
           requestId: request.requestId,
@@ -285,6 +293,9 @@ async function startClaudeRequest(event, request) {
         });
       },
       onToolStart: (tool) => {
+        if (activeRequest.deleted) {
+          return;
+        }
         toolNames.set(tool.id, tool.name);
         sendClaudeEvent(event.sender, {
           type: 'tool-start',
@@ -293,6 +304,9 @@ async function startClaudeRequest(event, request) {
         });
       },
       onToolInput: (tool) => {
+        if (activeRequest.deleted) {
+          return;
+        }
         const toolName = toolNames.get(tool.id);
         sendClaudeEvent(event.sender, {
           type: 'tool-input',
@@ -316,6 +330,9 @@ async function startClaudeRequest(event, request) {
         });
       },
       onToolResult: (tool) => {
+        if (activeRequest.deleted) {
+          return;
+        }
         sendClaudeEvent(event.sender, {
           type: 'tool-result',
           requestId: request.requestId,
@@ -346,6 +363,10 @@ async function startClaudeRequest(event, request) {
 
     const result = await stream.completion;
 
+    if (activeRequest.deleted) {
+      return;
+    }
+
     if (activeRequest.cancelled) {
       sendClaudeEvent(event.sender, {
         type: 'cancelled',
@@ -359,6 +380,9 @@ async function startClaudeRequest(event, request) {
       });
     }
   } catch (error) {
+    if (activeRequest.deleted) {
+      return;
+    }
     sendClaudeEvent(event.sender, {
       type: activeRequest?.cancelled ? 'cancelled' : 'error',
       requestId: request.requestId,
@@ -542,11 +566,29 @@ ipcMain.handle('goals:delete', async (event, goalId) => {
         'Deletes worktrees and branches for its started tasks. This cannot be undone.',
     });
     if (response === 0) {
-      return;
+      return { deleted: false };
     }
   }
 
-  await workerService.deleteGoal(goalId);
+  const activeRequest = activeRequests.get(`${event.sender.id}:${goalId}`);
+  if (activeRequest) {
+    activeRequest.deleted = true;
+    activeRequest.cancelled = true;
+    activeRequest.cancel();
+  }
+  try {
+    await workerService.deleteGoal(goalId);
+  } catch (error) {
+    if (activeRequest) {
+      activeRequest.deleted = false;
+      sendClaudeEvent(event.sender, {
+        type: 'cancelled',
+        requestId: activeRequest.requestId,
+      });
+    }
+    throw error;
+  }
+  return { deleted: true };
 });
 
 ipcMain.handle('goals:commit-tasks', (event, goalId) => {
