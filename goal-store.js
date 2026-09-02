@@ -975,6 +975,55 @@ class GoalStore {
     }
   }
 
+  listWorkStateForGoal(goalId) {
+    return this.database
+      .prepare(`
+        SELECT
+          t.id,
+          t.sequence,
+          t.title,
+          t.status,
+          w.status AS runStatus,
+          w.branch AS runBranch,
+          w.worktree AS runWorktree,
+          w.base_revision AS runBaseRevision,
+          w.error AS runError,
+          w.started_at AS runStartedAt,
+          w.finished_at AS runFinishedAt
+        FROM tasks t
+        LEFT JOIN worker_runs w ON w.task_id = t.id
+        WHERE t.goal_id = ? AND t.status <> 'draft'
+        ORDER BY t.sequence
+      `)
+      .all(goalId)
+      .map(
+        ({
+          runStatus,
+          runBranch,
+          runWorktree,
+          runBaseRevision,
+          runError,
+          runStartedAt,
+          runFinishedAt,
+          ...task
+        }) => ({
+          ...task,
+          run:
+            runStatus === undefined || runStatus === null
+              ? null
+              : {
+                  status: runStatus,
+                  branch: runBranch,
+                  worktree: runWorktree,
+                  baseRevision: runBaseRevision,
+                  error: runError,
+                  startedAt: runStartedAt,
+                  finishedAt: runFinishedAt,
+                },
+        }),
+      );
+  }
+
   listWorkerRunsForGoal(goalId) {
     return this.database
       .prepare(`

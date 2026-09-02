@@ -10,9 +10,49 @@ const {
 const {
   ArtifactsRepository,
   TasksRepository,
+  WorkStateReader,
   MAX_ARTIFACT_HTML_LENGTH,
 } = require('../findings-mcp-server');
 const { GoalStore } = require('../goal-store');
+
+function makeCommandError(code) {
+  const error = new Error(`git exited with code ${code}`);
+  error.code = code;
+  return error;
+}
+
+function seedTaskWithRun(store, { id, sequence, status, runStatus, branch }) {
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, 'goal-1', ?, ?, 'Do it.', 'queued', ?, ?)
+    `)
+    .run(
+      id,
+      sequence,
+      `Task ${sequence}`,
+      '2026-08-09T10:00:00.000Z',
+      '2026-08-09T10:00:00.000Z',
+    );
+  if (runStatus) {
+    store.createWorkerRun(id, {
+      branch,
+      worktree: `/worktrees/${id}`,
+      baseRevision: 'abc123',
+      startedAt: '2026-08-09T10:01:00.000Z',
+    });
+    if (runStatus !== 'working') {
+      store.updateWorkerRun(id, { status: runStatus });
+    }
+  }
+  if (status && status !== runStatus) {
+    store.database
+      .prepare('UPDATE tasks SET status = ? WHERE id = ?')
+      .run(status, id);
+  }
+}
 
 function goal(id) {
   return {
@@ -97,6 +137,238 @@ test('task repository isolates goals and preserves stable task identity', (t) =>
   store.close();
 });
 
+test('read_work_state reports git branch state via an injected runner', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workstate-test-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  store.save(goal('goal-1'));
+
+  seedTaskWithRun(store, {
+    id: 'task-merged',
+    sequence: 1,
+    status: 'merged',
+    runStatus: 'completed',
+    branch: 'rba/merged',
+  });
+  seedTaskWithRun(store, {
+    id: 'task-unmerged',
+    sequence: 2,
+    status: 'completed',
+    runStatus: 'completed',
+    branch: 'rba/unmerged',
+  });
+  seedTaskWithRun(store, {
+    id: 'task-gone',
+    sequence: 3,
+    status: 'failed',
+    runStatus: 'failed',
+    branch: 'rba/gone',
+  });
+  seedTaskWithRun(store, {
+    id: 'task-error',
+    sequence: 4,
+    status: 'completed',
+    runStatus: 'completed',
+    branch: 'rba/error',
+  });
+  seedTaskWithRun(store, {
+    id: 'task-queued',
+    sequence: 5,
+    status: 'queued',
+    runStatus: null,
+    branch: null,
+  });
+
+  let revParseHeadCalls = 0;
+  const runCommand = async (command, args) => {
+    assert.equal(command, 'git');
+    const subcommand = args[2];
+    if (subcommand === 'rev-parse' && args.includes('HEAD')) {
+      revParseHeadCalls += 1;
+      return { stdout: 'base-tip-sha\n' };
+    }
+    if (subcommand === 'rev-parse' && args.includes('--verify')) {
+      const branch = args.at(-1).replace('refs/heads/', '');
+      if (branch === 'rba/gone') {
+        throw makeCommandError(1);
+      }
+      return { stdout: '' };
+    }
+    if (subcommand === 'merge-base' && args.includes('--is-ancestor')) {
+      const branch = args.at(-2);
+      if (branch === 'rba/merged') {
+        return { stdout: '' };
+      }
+      if (branch === 'rba/unmerged') {
+        throw makeCommandError(1);
+      }
+      if (branch === 'rba/error') {
+        throw makeCommandError(128);
+      }
+      throw makeCommandError(1);
+    }
+    if (subcommand === 'rev-list' && args.includes('--count')) {
+      return { stdout: '2\n' };
+    }
+    if (subcommand === 'merge-base') {
+      return { stdout: 'merge-base-sha\n' };
+    }
+    if (subcommand === 'diff') {
+      return { stdout: 'a.txt\nb.txt\n' };
+    }
+    throw new Error(`Unexpected git invocation: ${args.join(' ')}`);
+  };
+
+  const reader = new WorkStateReader(filename, 'goal-1', { runCommand });
+  t.after(() => {
+    reader.close();
+    store.close();
+  });
+
+  const entries = await reader.read();
+  assert.equal(revParseHeadCalls, 1);
+
+  const bySequence = Object.fromEntries(
+    entries.map((entry) => [entry.sequence, entry]),
+  );
+
+  assert.equal(bySequence[1].git.mergedIntoBase, true);
+  assert.equal(bySequence[1].git.branchExists, true);
+  assert.equal(bySequence[1].attention, null);
+
+  assert.equal(bySequence[2].git.mergedIntoBase, false);
+  assert.equal(bySequence[2].attention, null);
+
+  assert.equal(bySequence[3].git.branchExists, false);
+  assert.equal(bySequence[3].git.mergedIntoBase, null);
+  assert.equal(bySequence[3].git.commitsAhead, null);
+  assert.equal(bySequence[3].git.filesChanged, null);
+  assert.equal(bySequence[3].git.error, null);
+  assert.equal(bySequence[3].attention, 'the worker run failed or was stopped');
+
+  assert.equal(bySequence[4].git.mergedIntoBase, null);
+  assert.equal(typeof bySequence[4].git.error, 'string');
+  assert.equal(bySequence[4].git.commitsAhead, null);
+
+  assert.equal(bySequence[5].run, null);
+  assert.equal(bySequence[5].git, null);
+  assert.equal(bySequence[5].startable, true);
+  assert.equal(bySequence[1].startable, false);
+});
+
+test('read_work_state flags a task marked merged whose branch is not an ancestor', async (t) => {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), 'rba-workstate-attention-'),
+  );
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  store.save(goal('goal-1'));
+  seedTaskWithRun(store, {
+    id: 'task-merged-diverged',
+    sequence: 1,
+    status: 'merged',
+    runStatus: 'completed',
+    branch: 'rba/diverged',
+  });
+
+  const runCommand = async (_command, args) => {
+    const subcommand = args[2];
+    if (subcommand === 'rev-parse' && args.includes('HEAD')) {
+      return { stdout: 'base-tip-sha\n' };
+    }
+    if (subcommand === 'rev-parse' && args.includes('--verify')) {
+      return { stdout: '' };
+    }
+    if (subcommand === 'merge-base' && args.includes('--is-ancestor')) {
+      throw makeCommandError(1);
+    }
+    if (subcommand === 'rev-list') {
+      return { stdout: '3\n' };
+    }
+    if (subcommand === 'merge-base') {
+      return { stdout: 'merge-base-sha\n' };
+    }
+    if (subcommand === 'diff') {
+      return { stdout: '' };
+    }
+    throw new Error(`Unexpected git invocation: ${args.join(' ')}`);
+  };
+
+  const reader = new WorkStateReader(filename, 'goal-1', { runCommand });
+  t.after(() => {
+    reader.close();
+    store.close();
+  });
+  const [entry] = await reader.read();
+  assert.equal(
+    entry.attention,
+    "the task is marked merged but its branch isn't an ancestor of the base",
+  );
+});
+
+test('read_work_state flags a run that finished while the task is still working', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'rba-workstate-stuck-'));
+  const filename = path.join(directory, 'goals.sqlite3');
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = new GoalStore(filename);
+  store.save(goal('goal-1'));
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES ('task-1', 'goal-1', 1, 'Stuck task', 'Do it.', 'queued',
+        '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z')
+    `)
+    .run();
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:01:00.000Z',
+  });
+  store.updateWorkerRun('task-1', { status: 'completed' });
+  store.database
+    .prepare("UPDATE tasks SET status = 'working' WHERE id = 'task-1'")
+    .run();
+
+  const runCommand = async (_command, args) => {
+    const subcommand = args[2];
+    if (subcommand === 'rev-parse' && args.includes('HEAD')) {
+      return { stdout: 'base-tip-sha\n' };
+    }
+    if (subcommand === 'rev-parse' && args.includes('--verify')) {
+      return { stdout: '' };
+    }
+    if (subcommand === 'merge-base' && args.includes('--is-ancestor')) {
+      throw makeCommandError(1);
+    }
+    if (subcommand === 'rev-list') {
+      return { stdout: '0\n' };
+    }
+    if (subcommand === 'merge-base') {
+      return { stdout: 'merge-base-sha\n' };
+    }
+    if (subcommand === 'diff') {
+      return { stdout: '' };
+    }
+    throw new Error(`Unexpected git invocation: ${args.join(' ')}`);
+  };
+
+  const reader = new WorkStateReader(filename, 'goal-1', { runCommand });
+  t.after(() => {
+    reader.close();
+    store.close();
+  });
+  const [entry] = await reader.read();
+  assert.equal(
+    entry.attention,
+    'the worker run finished but the task is still marked working',
+  );
+});
+
 test('serves artifact and task tools over MCP stdio', async (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'rba-planner-mcp-test-'));
   const filename = path.join(directory, 'goals.sqlite3');
@@ -125,6 +397,7 @@ test('serves artifact and task tools over MCP stdio', async (t) => {
     'list_artifacts',
     'list_workflows',
     'read_tasks',
+    'read_work_state',
     'register_workflow',
     'remove_artifact',
     'remove_task',
