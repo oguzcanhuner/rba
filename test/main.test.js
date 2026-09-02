@@ -57,7 +57,13 @@ function loadMainWithMocks({ beginClaudeCli }) {
   const mocks = {
     electron: electronMock,
     './goal-store': { GoalStore: class {} },
-    './worker-service': { WorkerService: class {} },
+    './worker-service': {
+      WorkerService: class {
+        recoverMissingSessions() {
+          return Promise.resolve();
+        }
+      },
+    },
     './claude-cli-service': { beginClaudeCli },
   };
 
@@ -156,7 +162,13 @@ function loadMainReadyWithMocks({ workflows = {} } = {}) {
         }
       },
     },
-    './worker-service': { WorkerService: class {} },
+    './worker-service': {
+      WorkerService: class {
+        recoverMissingSessions() {
+          return Promise.resolve();
+        }
+      },
+    },
     './workflow-service': {
       WorkflowService: class {
         constructor(options) {
