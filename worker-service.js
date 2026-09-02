@@ -120,6 +120,13 @@ class WorkerService {
       throw new Error('Only queued tasks can be started.');
     }
 
+    const blockers = this.store.getBlockingDependencies(taskId);
+    if (blockers.length > 0) {
+      throw new Error(
+        `Blocked by unmerged tasks: ${blockers.map((blocker) => blocker.title).join(', ')}.`,
+      );
+    }
+
     const { stdout: rootOutput } = await this.runCommand(
       'git',
       ['-C', task.workingDirectory, 'rev-parse', '--show-toplevel'],
@@ -157,12 +164,18 @@ class WorkerService {
       status: 'streaming',
       parts: [],
     };
-    this.store.createWorkerRun(taskId, {
-      branch,
-      worktree,
-      baseRevision,
-      startedAt,
-    });
+    try {
+      this.store.createWorkerRun(taskId, {
+        branch,
+        worktree,
+        baseRevision,
+        startedAt,
+      });
+    } catch (error) {
+      await this.removeWorktree(repositoryRoot, worktree);
+      await this.removeBranch(repositoryRoot, branch);
+      throw error;
+    }
     this.store.saveWorkerMessage(taskId, message);
     this.broadcast(taskId);
 

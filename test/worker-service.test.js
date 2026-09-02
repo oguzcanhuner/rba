@@ -99,6 +99,98 @@ test('runs a queued task in a worktree and persists streamed activity', async ()
   store.close();
 });
 
+test('does not create git state for a dependency-blocked task and allows retry', async () => {
+  const store = storeWithQueuedTask();
+  store.database
+    .prepare(`
+      INSERT INTO tasks (
+        id, goal_id, sequence, title, spec_markdown, status,
+        created_at, updated_at
+      ) VALUES (?, ?, 2, ?, ?, 'queued', ?, ?)
+    `)
+    .run(
+      'task-2',
+      'goal-1',
+      'Implement the dependent worker',
+      'Build on the first worker.',
+      '2026-08-09T10:01:00.000Z',
+      '2026-08-09T10:01:00.000Z',
+    );
+  store.setTaskDependencies('task-2', ['task-1']);
+
+  const commands = [];
+  let madeDirectory = false;
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {
+      madeDirectory = true;
+    },
+    runCommand: async (command, args) => {
+      commands.push({ command, args });
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+    beginWorker: () => ({
+      cancel: () => {},
+      completion: new Promise(() => {}),
+    }),
+  });
+
+  await assert.rejects(
+    service.start('task-2'),
+    /Blocked by unmerged tasks: Implement the worker\./,
+  );
+  assert.equal(madeDirectory, false);
+  assert.deepEqual(commands, []);
+  assert.equal(store.getWorkerRun('task-2'), null);
+
+  store.database
+    .prepare("UPDATE tasks SET status = 'merged' WHERE id = 'task-1'")
+    .run();
+  const started = await service.start('task-2');
+  assert.equal(started.status, 'working');
+  assert.equal(
+    commands.some(
+      ({ args }) => args.includes('worktree') && args.includes('add'),
+    ),
+    true,
+  );
+  store.close();
+});
+
+test('rolls back git state when worker run persistence fails', async () => {
+  const store = storeWithQueuedTask();
+  store.createWorkerRun = () => {
+    throw new Error('database write failed');
+  };
+  const commands = [];
+  const service = new WorkerService({
+    store,
+    worktreesDirectory: '/worker-root',
+    makeDirectory: async () => {},
+    runCommand: async (command, args) => {
+      commands.push({ command, args });
+      return {
+        stdout: args.at(-1) === '--show-toplevel' ? '/repo\n' : 'abc123\n',
+      };
+    },
+  });
+
+  await assert.rejects(service.start('task-1'), /database write failed/);
+  assert.deepEqual(
+    commands
+      .filter(({ args }) => args.includes('remove') || args.includes('-D'))
+      .map(({ args }) => args.slice(2)),
+    [
+      ['worktree', 'remove', '/worker-root/task-1', '--force'],
+      ['branch', '-D', 'rba/task-1'],
+    ],
+  );
+  store.close();
+});
+
 test('stops a running worker', async () => {
   const store = storeWithQueuedTask();
   let cancelled = false;
