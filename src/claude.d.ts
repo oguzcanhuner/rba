@@ -228,6 +228,7 @@ export type WorkflowRun = {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  isActive?: boolean;
   steps: WorkflowStepRun[];
 };
 

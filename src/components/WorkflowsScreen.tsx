@@ -2,7 +2,10 @@ import { memo, useMemo, useState } from 'react';
 import type { WorkflowStepRun } from '../claude';
 import { useWorkflows } from '../hooks/useWorkflows';
 import { formatRelativeTime } from '../lib/relativeTime';
-import { buildWorkflowTimeline } from '../lib/workflowTimeline';
+import {
+  buildWorkflowTimeline,
+  workflowRunControls,
+} from '../lib/workflowTimeline';
 import { TaskStatusIndicator } from './TaskStatusIndicator';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -100,11 +103,10 @@ export function WorkflowsScreen({ onBack }: WorkflowsScreenProps) {
     [workflows.activeRun, selected],
   );
 
-  const isRunning = workflows.activeRun?.status === 'running';
-  const canResume =
-    !isRunning &&
-    summary?.latestRun?.status === 'running' &&
-    summary.latestRun.id === workflows.activeRun?.id;
+  const { isRunning, canResume } = workflowRunControls(
+    workflows.activeRun,
+    summary?.latestRun?.id ?? null,
+  );
 
   async function chooseDirectory() {
     if (!selected) return;
@@ -217,6 +219,7 @@ export function WorkflowsScreen({ onBack }: WorkflowsScreenProps) {
                   <Button
                     size="sm"
                     variant="destructive"
+                    disabled={workflows.deleting}
                     onClick={() => void workflows.remove(selected.id)}
                   >
                     Delete
@@ -260,7 +263,7 @@ export function WorkflowsScreen({ onBack }: WorkflowsScreenProps) {
                   <span className="text-muted-foreground">
                     started {formatRelativeTime(workflows.activeRun.startedAt)}
                   </span>
-                  {summary && summary.latestRun && (
+                  {summary?.latestRun && (
                     <select
                       className="ml-auto rounded-md border border-input bg-input/30 px-2 py-1 text-xs"
                       value={workflows.activeRun.id}

@@ -727,6 +727,28 @@ class GoalStore {
     }
   }
 
+  /** Runs that never recorded a session id, so their chat cannot be resumed
+   * until one is recovered from the CLI's own session files. */
+  listWorkerRunsMissingSession() {
+    return this.database
+      .prepare(`
+        SELECT task_id AS taskId, worktree
+        FROM worker_runs
+        WHERE session_id IS NULL AND status <> 'working'
+      `)
+      .all();
+  }
+
+  /** Records the CLI session id mid-run so an interrupted worker can still be
+   * resumed from chat. */
+  saveWorkerSessionId(taskId, sessionId) {
+    this.database
+      .prepare(
+        'UPDATE worker_runs SET session_id = ? WHERE task_id = ? AND session_id IS NULL',
+      )
+      .run(sessionId, taskId);
+  }
+
   updateWorkerRun(taskId, { status, sessionId = null, error = null }) {
     const now = new Date().toISOString();
     const finishedAt = status === 'working' ? null : now;
@@ -951,6 +973,55 @@ class GoalStore {
     if (result.changes === 0) {
       throw new Error('This goal no longer exists.');
     }
+  }
+
+  listWorkStateForGoal(goalId) {
+    return this.database
+      .prepare(`
+        SELECT
+          t.id,
+          t.sequence,
+          t.title,
+          t.status,
+          w.status AS runStatus,
+          w.branch AS runBranch,
+          w.worktree AS runWorktree,
+          w.base_revision AS runBaseRevision,
+          w.error AS runError,
+          w.started_at AS runStartedAt,
+          w.finished_at AS runFinishedAt
+        FROM tasks t
+        LEFT JOIN worker_runs w ON w.task_id = t.id
+        WHERE t.goal_id = ? AND t.status <> 'draft'
+        ORDER BY t.sequence
+      `)
+      .all(goalId)
+      .map(
+        ({
+          runStatus,
+          runBranch,
+          runWorktree,
+          runBaseRevision,
+          runError,
+          runStartedAt,
+          runFinishedAt,
+          ...task
+        }) => ({
+          ...task,
+          run:
+            runStatus === undefined || runStatus === null
+              ? null
+              : {
+                  status: runStatus,
+                  branch: runBranch,
+                  worktree: runWorktree,
+                  baseRevision: runBaseRevision,
+                  error: runError,
+                  startedAt: runStartedAt,
+                  finishedAt: runFinishedAt,
+                },
+        }),
+      );
   }
 
   listWorkerRunsForGoal(goalId) {

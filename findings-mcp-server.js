@@ -1,6 +1,8 @@
+const { execFile } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
+const { promisify } = require('node:util');
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const {
   StdioServerTransport,
@@ -11,6 +13,10 @@ const {
   validateDefinition,
   normaliseDefinition,
 } = require('./workflow-spec');
+const { GoalStore } = require('./goal-store');
+
+const execFileAsync = promisify(execFile);
+const GIT_COMMAND_OPTIONS = { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 };
 
 const MAX_ARTIFACT_TITLE_LENGTH = 200;
 const MAX_ARTIFACT_HTML_LENGTH = 1_000_000;
@@ -527,6 +533,18 @@ class WorkflowsRepository {
   }
 
   remove(name) {
+    const running = this.database
+      .prepare(`
+        SELECT 1
+        FROM workflow_runs r
+        JOIN workflows w ON w.id = r.workflow_id
+        WHERE w.name = ? AND r.status = 'running'
+        LIMIT 1
+      `)
+      .get(name);
+    if (running) {
+      throw new Error('A running workflow cannot be removed.');
+    }
     const result = this.database
       .prepare('DELETE FROM workflows WHERE name = ?')
       .run(name);
@@ -577,10 +595,202 @@ class WorkflowsRepository {
   }
 }
 
+const ATTENTION_REASONS = {
+  RUN_FAILED: 'the worker run failed or was stopped',
+  MERGED_BUT_NOT_ANCESTOR:
+    "the task is marked merged but its branch isn't an ancestor of the base",
+  ANCESTOR_BUT_NOT_MERGED:
+    "the branch is an ancestor of the base but the task isn't marked merged",
+  FINISHED_BUT_STILL_WORKING:
+    'the worker run finished but the task is still marked working',
+};
+
+class WorkStateReader {
+  constructor(filename, goalId, { runCommand = execFileAsync } = {}) {
+    if (!path.isAbsolute(filename)) {
+      throw new Error('The goal database path must be absolute.');
+    }
+    if (
+      typeof goalId !== 'string' ||
+      goalId.length === 0 ||
+      goalId.length > 100
+    ) {
+      throw new Error('The goal ID is invalid.');
+    }
+
+    this.goalId = goalId;
+    this.runCommand = runCommand;
+    this.database = new DatabaseSync(filename);
+    this.database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
+    `);
+    this.store = new GoalStore(filename);
+  }
+
+  getWorkingDirectory() {
+    const row = this.database
+      .prepare(
+        'SELECT working_directory AS workingDirectory FROM goals WHERE id = ?',
+      )
+      .get(this.goalId);
+    return row ? row.workingDirectory : null;
+  }
+
+  async resolveBaseTip(root) {
+    try {
+      const { stdout } = await this.runCommand(
+        'git',
+        ['-C', root, 'rev-parse', 'HEAD'],
+        GIT_COMMAND_OPTIONS,
+      );
+      return stdout.trim();
+    } catch {
+      return null;
+    }
+  }
+
+  async branchExists(root, branch) {
+    try {
+      await this.runCommand(
+        'git',
+        [
+          '-C',
+          root,
+          'rev-parse',
+          '--verify',
+          '--quiet',
+          `refs/heads/${branch}`,
+        ],
+        GIT_COMMAND_OPTIONS,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async resolveGitState(root, branch, baseTip) {
+    const git = {
+      branchExists: false,
+      mergedIntoBase: null,
+      commitsAhead: null,
+      filesChanged: null,
+      error: null,
+    };
+
+    const exists = await this.branchExists(root, branch);
+    git.branchExists = exists;
+    if (!exists) {
+      return git;
+    }
+    if (baseTip === null) {
+      git.error = 'Could not resolve the base tip.';
+      return git;
+    }
+
+    try {
+      await this.runCommand(
+        'git',
+        ['-C', root, 'merge-base', '--is-ancestor', branch, baseTip],
+        GIT_COMMAND_OPTIONS,
+      );
+      git.mergedIntoBase = true;
+    } catch (error) {
+      if (typeof error?.code === 'number' && error.code === 1) {
+        git.mergedIntoBase = false;
+      } else {
+        git.error = error instanceof Error ? error.message : String(error);
+        return git;
+      }
+    }
+
+    try {
+      const { stdout: countOutput } = await this.runCommand(
+        'git',
+        ['-C', root, 'rev-list', '--count', `${baseTip}..${branch}`],
+        GIT_COMMAND_OPTIONS,
+      );
+      git.commitsAhead = Number.parseInt(countOutput.trim(), 10);
+
+      const { stdout: mergeBaseOutput } = await this.runCommand(
+        'git',
+        ['-C', root, 'merge-base', branch, baseTip],
+        GIT_COMMAND_OPTIONS,
+      );
+      const mergeBase = mergeBaseOutput.trim();
+      const { stdout: diffOutput } = await this.runCommand(
+        'git',
+        ['-C', root, 'diff', '--name-only', `${mergeBase}..${branch}`],
+        GIT_COMMAND_OPTIONS,
+      );
+      git.filesChanged = diffOutput
+        .split('\n')
+        .filter((line) => line.length > 0).length;
+    } catch (error) {
+      git.error = error instanceof Error ? error.message : String(error);
+    }
+
+    return git;
+  }
+
+  attentionFor(task) {
+    if (
+      task.run &&
+      (task.run.status === 'failed' || task.run.status === 'stopped')
+    ) {
+      return ATTENTION_REASONS.RUN_FAILED;
+    }
+    if (task.status === 'merged' && task.git?.mergedIntoBase === false) {
+      return ATTENTION_REASONS.MERGED_BUT_NOT_ANCESTOR;
+    }
+    if (task.status !== 'merged' && task.git?.mergedIntoBase === true) {
+      return ATTENTION_REASONS.ANCESTOR_BUT_NOT_MERGED;
+    }
+    if (task.run && task.run.finishedAt !== null && task.status === 'working') {
+      return ATTENTION_REASONS.FINISHED_BUT_STILL_WORKING;
+    }
+    return null;
+  }
+
+  async read() {
+    const tasks = this.store.listWorkStateForGoal(this.goalId);
+    const root = this.getWorkingDirectory();
+    const baseTip = root === null ? null : await this.resolveBaseTip(root);
+
+    const result = [];
+    for (const task of tasks) {
+      let git = null;
+      if (task.run?.branch && root !== null) {
+        git = await this.resolveGitState(root, task.run.branch, baseTip);
+      }
+
+      const entry = {
+        id: task.id,
+        sequence: task.sequence,
+        title: task.title,
+        status: task.status,
+        run: task.run,
+        git,
+        startable: task.status === 'queued' && task.run === null,
+      };
+      entry.attention = this.attentionFor(entry);
+      result.push(entry);
+    }
+    return result;
+  }
+
+  close() {
+    this.database.close();
+    this.store.close();
+  }
+}
+
 async function startServer({ databasePath, goalId }) {
   const artifacts = new ArtifactsRepository(databasePath, goalId);
   const tasks = new TasksRepository(databasePath, goalId);
   const workflows = new WorkflowsRepository(databasePath);
+  const workState = new WorkStateReader(databasePath, goalId);
   const server = new McpServer({ name: 'rba-planner', version: '1.0.0' });
 
   server.registerTool(
@@ -698,6 +908,42 @@ async function startServer({ databasePath, goalId }) {
               currentTasks.length === 0
                 ? '(there are no tasks yet)'
                 : JSON.stringify(currentTasks, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'read_work_state',
+    {
+      title: 'Read work state',
+      description:
+        "Read the active goal's tasks with their worker runs and real " +
+        'git branch state, to advise on what to work on next.',
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const entries = await workState.read();
+      const summary = entries
+        .map((entry) => {
+          const branch = entry.run?.branch ?? null;
+          const flag = entry.attention
+            ? ` [attention: ${entry.attention}]`
+            : '';
+          return `#${entry.sequence} ${entry.title} — status: ${entry.status}${
+            branch ? `, branch: ${branch}` : ''
+          }${entry.startable ? ', startable' : ''}${flag}`;
+        })
+        .join('\n');
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              entries.length === 0
+                ? '(there are no tasks yet)'
+                : `${summary}\n\n${JSON.stringify(entries, null, 2)}`,
           },
         ],
       };
@@ -970,13 +1216,21 @@ async function startServer({ databasePath, goalId }) {
       inputSchema: { name: z.string().min(1).max(64) },
       annotations: { destructiveHint: true, idempotentHint: true },
     },
-    async ({ name }) =>
-      workflows.remove(name)
-        ? { content: [{ type: 'text', text: 'Workflow removed.' }] }
-        : {
-            content: [{ type: 'text', text: 'No workflow has that name.' }],
-            isError: true,
-          },
+    async ({ name }) => {
+      try {
+        return workflows.remove(name)
+          ? { content: [{ type: 'text', text: 'Workflow removed.' }] }
+          : {
+              content: [{ type: 'text', text: 'No workflow has that name.' }],
+              isError: true,
+            };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: error.message }],
+          isError: true,
+        };
+      }
+    },
   );
 
   server.registerTool(
@@ -1010,6 +1264,7 @@ async function startServer({ databasePath, goalId }) {
     artifacts.close();
     tasks.close();
     workflows.close();
+    workState.close();
   };
   process.once('SIGINT', () => void shutdown());
   process.once('SIGTERM', () => void shutdown());
@@ -1031,6 +1286,7 @@ module.exports = {
   ArtifactsRepository,
   TasksRepository,
   WorkflowsRepository,
+  WorkStateReader,
   MAX_ARTIFACT_HTML_LENGTH,
   MAX_ARTIFACT_TITLE_LENGTH,
   MAX_TASK_SPEC_LENGTH,

@@ -596,6 +596,81 @@ test('scopes listWorkerRunsForGoal to the goal', () => {
   store.close();
 });
 
+test('lists work state for a goal ordered by sequence, excluding drafts', () => {
+  const store = new GoalStore(':memory:');
+  store.save(goal());
+  const insertTask = store.database.prepare(`
+    INSERT INTO tasks (
+      id, goal_id, sequence, title, spec_markdown, status,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertTask.run(
+    'task-draft',
+    'goal-1',
+    1,
+    'Draft task',
+    'Not committed yet.',
+    'draft',
+    '2026-08-09T10:00:00.000Z',
+    '2026-08-09T10:00:00.000Z',
+  );
+  insertTask.run(
+    'task-2',
+    'goal-1',
+    2,
+    'Never started',
+    'Queued but not started.',
+    'queued',
+    '2026-08-09T10:01:00.000Z',
+    '2026-08-09T10:01:00.000Z',
+  );
+  insertTask.run(
+    'task-1',
+    'goal-1',
+    3,
+    'Implement workers',
+    'Build the worker.',
+    'queued',
+    '2026-08-09T10:02:00.000Z',
+    '2026-08-09T10:02:00.000Z',
+  );
+  store.createWorkerRun('task-1', {
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
+    startedAt: '2026-08-09T10:03:00.000Z',
+  });
+  store.saveWorkerMessage('task-1', {
+    id: 'worker-task-1',
+    role: 'assistant',
+    status: 'streaming',
+    parts: [{ type: 'text', id: 'part-1', text: 'Working.' }],
+  });
+
+  const workState = store.listWorkStateForGoal('goal-1');
+
+  assert.deepEqual(
+    workState.map(({ id, sequence }) => ({ id, sequence })),
+    [
+      { id: 'task-2', sequence: 2 },
+      { id: 'task-1', sequence: 3 },
+    ],
+  );
+  assert.equal(workState[0].run, null);
+  assert.deepEqual(workState[1].run, {
+    status: 'working',
+    branch: 'rba/task-1',
+    worktree: '/worktrees/task-1',
+    baseRevision: 'abc123',
+    error: null,
+    startedAt: '2026-08-09T10:03:00.000Z',
+    finishedAt: null,
+  });
+  assert.equal(JSON.stringify(workState).includes('Working.'), false);
+  store.close();
+});
+
 test('marks unfinished workers and tool activity as failed on restart', () => {
   const store = new GoalStore(':memory:');
   store.save(goal());

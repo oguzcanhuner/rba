@@ -57,7 +57,13 @@ function loadMainWithMocks({ beginClaudeCli }) {
   const mocks = {
     electron: electronMock,
     './goal-store': { GoalStore: class {} },
-    './worker-service': { WorkerService: class {} },
+    './worker-service': {
+      WorkerService: class {
+        recoverMissingSessions() {
+          return Promise.resolve();
+        }
+      },
+    },
     './claude-cli-service': { beginClaudeCli },
   };
 
@@ -101,6 +107,10 @@ function loadMainReadyWithMocks({ workflows = {} } = {}) {
       workflowServiceCalls.push({ method: 'stop', runId });
       return { id: runId, status: 'stopped' };
     },
+    delete: async (id) => {
+      workflowServiceCalls.push({ method: 'delete', id });
+    },
+    withActivity: (run) => (run ? { ...run, isActive: false } : null),
     shutdown: () => {},
   };
 
@@ -156,7 +166,13 @@ function loadMainReadyWithMocks({ workflows = {} } = {}) {
         }
       },
     },
-    './worker-service': { WorkerService: class {} },
+    './worker-service': {
+      WorkerService: class {
+        recoverMissingSessions() {
+          return Promise.resolve();
+        }
+      },
+    },
     './workflow-service': {
       WorkflowService: class {
         constructor(options) {
@@ -384,6 +400,18 @@ test('workflows:start forwards resolved options to the workflow service', async 
       id: 'workflow-1',
       options: { directory: '/workspace', fresh: true },
     },
+  ]);
+});
+
+test('workflows:delete delegates lifecycle cleanup to the workflow service', async () => {
+  const { ipcHandleHandlers, workflowServiceCalls } = loadMainReadyWithMocks();
+  await flush();
+  const handler = ipcHandleHandlers.get('workflows:delete');
+
+  await handler(fakeEvent(1), 'workflow-1');
+
+  assert.deepEqual(workflowServiceCalls, [
+    { method: 'delete', id: 'workflow-1' },
   ]);
 });
 

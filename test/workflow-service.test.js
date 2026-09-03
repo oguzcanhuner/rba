@@ -8,14 +8,19 @@ const { test } = require('node:test');
 const { GoalStore } = require('../goal-store');
 const { WorkflowService } = require('../workflow-service');
 
-function fakeChild() {
+function fakeChild({ ignoreTerm = false } = {}) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.pid = 4242;
   child.killed = false;
-  child.kill = () => {
+  child.signals = [];
+  child.kill = (signal) => {
     child.killed = true;
+    child.signals.push(signal);
+    if (signal === 'SIGKILL' || !ignoreTerm) {
+      queueMicrotask(() => child.emit('close', null));
+    }
   };
   return child;
 }
@@ -28,7 +33,7 @@ function scriptedSpawn(scripts) {
   const spawnProcess = (command, args, options) => {
     const script = scripts[call];
     call += 1;
-    const child = fakeChild();
+    const child = fakeChild(script);
     children.push({ child, command, args, options });
     if (script.immediate !== false) {
       queueMicrotask(() => {
@@ -298,7 +303,7 @@ test('stop leaves the run resumable', async () => {
   const run = await service.start(workflow.id);
   await waitForImmediate();
 
-  const stopped = service.stop(run.id);
+  const stopped = await service.stop(run.id);
   assert.equal(stopped.status, 'stopped');
   assert.equal(stopped.currentStep, 'build');
   store.close();
@@ -314,12 +319,13 @@ test('a timeout kills and records an engine error', async () => {
     },
   };
   const { store, workflow } = storeWithWorkflow(definition);
-  const { spawnProcess } = scriptedSpawn([{ immediate: false }]);
+  const { spawnProcess, children } = scriptedSpawn([{ immediate: false }]);
   const updates = [];
   const service = new WorkflowService({
     store,
     spawnProcess,
     onUpdate: (run) => updates.push(run),
+    killGraceMs: 1,
   });
 
   await service.start(workflow.id);
@@ -328,6 +334,76 @@ test('a timeout kills and records an engine error', async () => {
   const run = updates.at(-1);
   assert.equal(run.status, 'failed');
   assert.ok(run.error.includes('timed out'));
+  assert.deepEqual(children[0].child.signals, ['SIGTERM']);
+  store.close();
+  rmSync(directory, { force: true, recursive: true });
+});
+
+test('timeout escalates to SIGKILL when the process group ignores SIGTERM', async () => {
+  const definition = {
+    start: 'build',
+    steps: {
+      build: { run: 'sleep 100', next: 'done', timeoutMs: 5 },
+      done: { type: 'terminal' },
+    },
+  };
+  const { store, workflow } = storeWithWorkflow(definition);
+  const { spawnProcess, children } = scriptedSpawn([
+    { immediate: false, ignoreTerm: true },
+  ]);
+  const service = new WorkflowService({
+    store,
+    spawnProcess,
+    killGraceMs: 5,
+  });
+
+  const started = await service.start(workflow.id);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.deepEqual(children[0].child.signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(store.getWorkflowRun(started.id).status, 'failed');
+  store.close();
+  rmSync(directory, { force: true, recursive: true });
+});
+
+test('stop escalates to SIGKILL when the process group ignores SIGTERM', async () => {
+  const { store, workflow } = storeWithWorkflow(linearDefinition());
+  const { spawnProcess, children } = scriptedSpawn([
+    { immediate: false, ignoreTerm: true },
+  ]);
+  const service = new WorkflowService({
+    store,
+    spawnProcess,
+    killGraceMs: 5,
+  });
+
+  const started = await service.start(workflow.id);
+  const stopped = await service.stop(started.id);
+
+  assert.deepEqual(children[0].child.signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.isActive, false);
+  store.close();
+  rmSync(directory, { force: true, recursive: true });
+});
+
+test('deleting a running workflow terminates it before removing its rows', async () => {
+  const { store, workflow } = storeWithWorkflow(linearDefinition());
+  const { spawnProcess, children } = scriptedSpawn([
+    { immediate: false, ignoreTerm: true },
+  ]);
+  const service = new WorkflowService({
+    store,
+    spawnProcess,
+    killGraceMs: 5,
+  });
+
+  await service.start(workflow.id);
+  await service.delete(workflow.id);
+
+  assert.deepEqual(children[0].child.signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(store.getWorkflow(workflow.id), null);
+  assert.equal(service.running.size, 0);
   store.close();
   rmSync(directory, { force: true, recursive: true });
 });

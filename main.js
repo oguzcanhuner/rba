@@ -17,6 +17,7 @@ let goalStore;
 let goalDatabase;
 let workerService;
 let workflowService;
+let shutdownComplete = false;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -776,7 +777,7 @@ ipcMain.handle('workflows:run-get', (event, runId) => {
   ) {
     throw new Error('Invalid workflow run request.');
   }
-  return goalStore.getWorkflowRun(runId);
+  return workflowService.withActivity(goalStore.getWorkflowRun(runId));
 });
 
 ipcMain.handle('workflows:start', (event, id, options) => {
@@ -814,7 +815,7 @@ ipcMain.handle('workflows:stop', (event, runId) => {
   return workflowService.stop(runId);
 });
 
-ipcMain.handle('workflows:delete', (event, id) => {
+ipcMain.handle('workflows:delete', async (event, id) => {
   if (
     !isTrustedSender(event.senderFrame) ||
     typeof id !== 'string' ||
@@ -823,7 +824,7 @@ ipcMain.handle('workflows:delete', (event, id) => {
   ) {
     throw new Error('Invalid workflow request.');
   }
-  goalStore.deleteWorkflow(id);
+  await workflowService.delete(id);
 });
 
 ipcMain.handle('workflows:save', (event, request) => {
@@ -929,6 +930,7 @@ app.whenReady().then(() => {
     store: goalStore,
     onUpdate: broadcastWorkflow,
   });
+  void workerService.recoverMissingSessions();
   createWindow();
 
   app.on('activate', () => {
@@ -938,10 +940,17 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('will-quit', () => {
+app.on('before-quit', (event) => {
+  if (shutdownComplete) {
+    return;
+  }
+  event.preventDefault();
   workerService?.shutdown();
-  workflowService?.shutdown();
-  goalStore?.close();
+  void Promise.resolve(workflowService?.shutdown()).finally(() => {
+    goalStore?.close();
+    shutdownComplete = true;
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {

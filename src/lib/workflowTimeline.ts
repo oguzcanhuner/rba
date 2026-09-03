@@ -1,5 +1,17 @@
 import type { WorkflowDefinition, WorkflowStepRun } from '../claude';
 
+export function workflowRunControls(
+  run: { id: string; status: string; isActive?: boolean } | null,
+  latestRunId: string | null,
+) {
+  const isRunning = run?.isActive === true;
+  return {
+    isRunning,
+    canResume:
+      !isRunning && run?.status === 'running' && run.id === latestRunId,
+  };
+}
+
 export type TimelineRow = WorkflowStepRun & {
   /** 1-based occurrence of this step name within the run, so a loop shows
    * as one row per visit instead of collapsing repeats into one. */
